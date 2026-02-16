@@ -1,0 +1,13 @@
+{
+  "welcomeFile": "/",
+  "authenticationMethod": "route",
+  "routes": [
+    {
+      "source": "^/mdg/(.*)$",
+      "target": "/mdg/$1",
+      "destination": "mdg_srv",
+      "authenticationType": "xsuaa",
+      "csrfProtection": false
+    }
+  ]
+}

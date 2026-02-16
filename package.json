@@ -1,0 +1,105 @@
+{
+  "name": "mdg-services-nodejs",
+  "version": "1.0.0",
+  "description": "CCU MDG Services - CAP Node.js (Requests + FieldControls + ValueHelp/Prefill via S4H-TECH)",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@sap/cds": "^8.7.1",
+    "@sap/cds-dk": "^8.0.0",
+    "@sap/cds-hana": "^2.0.0",
+    "@sap/cds-odata-v2-adapter-proxy": "^1.8.11",
+    "@sap/hana-client": "^2.16.21",
+    "@sap/xsenv": "^4.1.1",
+    "@sap/xssec": "^3.2.11",
+    "@sap-cloud-sdk/connectivity": "^3.13.0",
+    "@sap-cloud-sdk/http-client": "^3.13.0",
+    "dotenv": "^10.0.0",
+    "axios": "^0.27.2",
+    "express": "^4.17.3"
+  },
+  "scripts": {
+    "start": "npx cds run",
+    "start:local": "cds run",
+    "build": "cds build/all",
+    "watch": "cds watch",
+    "env": "cp ./default-env.json ./db/default-env.json && cp ./default-env.json ./srv/default-env.json",
+    "default_env": "cf default-env mdg-services-nodejs-srv",
+    "default_env_install": "cf install-plugin DefaultEnv",
+    "kill_cds_port": "kill -9 $(lsof -t -i:4004)",
+    "kill_bas_port": "lwctl -c basic-tools kill -9 $(lwctl -c basic-tools ps aux | grep 'node_modules/.bin/cds run' | awk '{print $2}')",
+    "kill_bas_port_2": "lwctl -c basic-tools kill -9 $(lwctl -c basic-tools ps aux | grep 'cds serve' | awk '{print $2}')"
+  },
+  "eslintConfig": {
+    "extends": "eslint:recommended",
+    "env": {
+      "es2020": true,
+      "node": true
+    },
+    "globals": {
+      "SELECT": true,
+      "INSERT": true,
+      "UPDATE": true,
+      "DELETE": true,
+      "CREATE": true,
+      "DROP": true,
+      "CDL": true,
+      "CQL": true,
+      "CXL": true,
+      "cds": true
+    },
+    "rules": {
+      "no-console": "off",
+      "require-atomic-updates": "off"
+    }
+  },
+  "cds": {
+    "cdsc": {
+      "variableReplacements": {
+        "$user": {
+          "directory": "A",
+          "version": 1
+        },
+        "$session": {
+          "version": "SESSION_CONTEXT('VERSION')"
+        }
+      }
+    },
+    "hana": {
+      "deploy-format": "hdbtable"
+    },
+    "requires": {
+      "db": {
+        "kind": "hana",
+        "vcap": {
+          "label": "hana",
+          "name": "mdg-services-nodejs-db"
+        },
+        "pool": {
+          "max": 500,
+          "acquireTimeoutMillis": 5000,
+          "idleTimeoutMillis": 15000,
+          "testOnBorrow": true,
+          "evictionRunIntervalMillis": 30000
+        },
+        "auth": "xsuaa",
+        "connectivity": true,
+        "destinations": true
+      },
+      "S4H": {
+        "kind": "odata-v2",
+        "credentials": {
+          "destination": "S4H-TECH",
+          "requestTimeout": 30000
+        }
+      }
+    },
+    "db": {
+      "model": [
+        "db",
+        "srv"
+      ],
+      "kind": "hana"
+    }
+  }
+}

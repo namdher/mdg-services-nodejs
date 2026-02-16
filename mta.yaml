@@ -1,55 +1,120 @@
-_schema-version: "3.2"
+_schema-version: "3.3.0"
 ID: mdg-services-nodejs
 version: 1.0.0
+description: CAP project with local views and shared CCU schema
+
+parameters:
+  enable-parallel-deployments: true
+
+build-parameters:
+  before-all:
+    - builder: custom
+      commands:
+        - npm install
+        - npx cds build --production
 
 modules:
-  - name: mdg-services-nodejs-db
-    type: hdb
-    path: db
-    requires:
-      - name: mdg-services-nodejs-hdi
-      - name: ccu-external-hdi-service
-
   - name: mdg-services-nodejs-srv
     type: nodejs
-    path: srv
-    parameters:
-      buildpack: nodejs_buildpack
+    path: gen/srv
     requires:
-      - name: mdg-services-nodejs-hdi
-      - name: xsuaa
-      - name: destination
-      - name: connectivity
-    provides:
-      - name: mdg-services-nodejs-api
+      - name: mdg-services-nodejs-auth
+      - name: mdg-services-nodejs-db
         properties:
-          url: ${default-url}
+          TARGET_CONTAINER: ~{hdi-service-name}
+      - name: hdi_ccu-ddl-hana-db
+        group: SERVICE_REPLACEMENTS
+        properties:
+          key: ccu-external-hdi-service
+          service: "~{ccu-container-name}"
+      - name: mdg-services-nodejs-destination
+      - name: mdg-services-nodejs-connectivity
+      - name: mdg-services-nodejs-logging
+    provides:
+      - name: srv-api
+        properties:
+          srv-url: ${default-url}
+    parameters:
+      memory: 1024M
+      disk-quota: 2048M
+      buildpack: nodejs_buildpack
+
+  - name: mdg-services-nodejs-db-deployer
+    type: hdb
+    path: gen/db
+    parameters:
+      app-name: mdg-services-nodejs-db
+    requires:
+      - name: mdg-services-nodejs-db
+        properties:
+          TARGET_CONTAINER: "~{hdi-service-name}"
+      - name: hdi_ccu-ddl-hana-db
+        group: SERVICE_REPLACEMENTS
+        properties:
+          key: ccu-external-hdi-service
+          service: "~{ccu-container-name}"
+
+  - name: mdg-services-nodejs-approuter
+    type: approuter.nodejs
+    path: approuter
+    requires:
+      - name: srv-api
+        group: destinations
+        properties:
+          name: mdg_srv
+          url: ~{srv-url}
+          forwardAuthToken: true
+      - name: mdg-services-nodejs-auth
+      - name: mdg-services-nodejs-approuter-destination
+    parameters:
+      memory: 256M
+      disk-quota: 256M
 
 resources:
-  - name: mdg-services-nodejs-hdi
+  - name: mdg-services-nodejs-auth
+    type: org.cloudfoundry.managed-service
+    parameters:
+      config:
+        xsappname: mdg-services-nodejs
+        tenant-mode: dedicated
+      service: xsuaa
+      service-plan: application
+
+  - name: mdg-services-nodejs-db
     type: com.sap.xs.hdi-container
     parameters:
       service: hana
       service-plan: hdi-shared
+    properties:
+      hdi-service-name: ${service-name}
 
-  - name: ccu-external-hdi-service
+  - name: hdi_ccu-ddl-hana-db
     type: org.cloudfoundry.existing-service
-
-  - name: xsuaa
-    type: org.cloudfoundry.managed-service
     parameters:
-      service: xsuaa
-      service-plan: application
-      path: xs-security.json
+      service-name: hdi_ccu-ddl-hana-db
+    properties:
+      ccu-container-name: ${service-name}
 
-  - name: destination
+  - name: mdg-services-nodejs-destination
     type: org.cloudfoundry.managed-service
     parameters:
       service: destination
       service-plan: lite
 
-  - name: connectivity
+  - name: mdg-services-nodejs-connectivity
     type: org.cloudfoundry.managed-service
     parameters:
       service: connectivity
+      service-plan: lite
+
+  - name: mdg-services-nodejs-logging
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: application-logs
+      service-plan: lite
+
+  - name: mdg-services-nodejs-approuter-destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
       service-plan: lite

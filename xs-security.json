@@ -3,16 +3,27 @@
   "tenant-mode": "dedicated",
   "scopes": [
     {
-      "name": "$XSAPPNAME.User",
-      "description": "User"
+      "name": "$XSAPPNAME.MDG.Access",
+      "description": "Access to MDG services"
+    },
+    {
+      "name": "$XSAPPNAME.MDG.Admin",
+      "description": "Admin access for MDG configuration"
     }
   ],
   "role-templates": [
     {
-      "name": "User",
-      "description": "User",
+      "name": "MDG_Access",
+      "description": "MDG - Access",
       "scope-references": [
-        "$XSAPPNAME.User"
+        "$XSAPPNAME.MDG.Access"
+      ]
+    },
+    {
+      "name": "MDG_Admin",
+      "description": "MDG - Admin",
+      "scope-references": [
+        "$XSAPPNAME.MDG.Admin"
       ]
     }
   ]

@@ -1,0 +1,21 @@
+@server = http://localhost:4004
+
+@credentials = Authorization: Basic P029977:
+
+###V2
+GET {{server}}/v2/mdg/RequestValues
+{{credentials}}
+
+###V2
+GET {{server}}/mdg/RequestValues
+{{credentials}}
+
+### ValueHelp collection
+GET {{server}}/mdg/VH_CustomerGen?$top=5
+{{credentials}}
+
+### Metadata V2
+GET {{server}}/v2/mdg/$metadata
+{{credentials}}
+
+
