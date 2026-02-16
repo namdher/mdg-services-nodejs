@@ -1,0 +1,55 @@
+_schema-version: "3.2"
+ID: mdg-services-nodejs
+version: 1.0.0
+
+modules:
+  - name: mdg-services-nodejs-db
+    type: hdb
+    path: db
+    requires:
+      - name: mdg-services-nodejs-hdi
+      - name: ccu-external-hdi-service
+
+  - name: mdg-services-nodejs-srv
+    type: nodejs
+    path: srv
+    parameters:
+      buildpack: nodejs_buildpack
+    requires:
+      - name: mdg-services-nodejs-hdi
+      - name: xsuaa
+      - name: destination
+      - name: connectivity
+    provides:
+      - name: mdg-services-nodejs-api
+        properties:
+          url: ${default-url}
+
+resources:
+  - name: mdg-services-nodejs-hdi
+    type: com.sap.xs.hdi-container
+    parameters:
+      service: hana
+      service-plan: hdi-shared
+
+  - name: ccu-external-hdi-service
+    type: org.cloudfoundry.existing-service
+
+  - name: xsuaa
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: xsuaa
+      service-plan: application
+      path: xs-security.json
+
+  - name: destination
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: destination
+      service-plan: lite
+
+  - name: connectivity
+    type: org.cloudfoundry.managed-service
+    parameters:
+      service: connectivity
+      service-plan: lite

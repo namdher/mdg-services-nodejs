@@ -1,0 +1,6 @@
+node_modules/
+gen/
+.DS_Store
+.vscode/
+default-env.json
+*.env

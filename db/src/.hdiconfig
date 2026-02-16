@@ -1,0 +1,7 @@
+{
+  "file_suffixes": {
+    "hdbsynonym": {
+      "plugin_name": "com.sap.hana.di.synonym"
+    }
+  }
+}

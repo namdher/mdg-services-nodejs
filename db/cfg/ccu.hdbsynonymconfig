@@ -1,0 +1,134 @@
+{
+  "MDG_MASTER_OBJECT": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_MASTER_OBJECT"
+    }
+  },
+  "MDG_OBJECT_BLOCK": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_OBJECT_BLOCK"
+    }
+  },
+  "MDG_FIELD_CATALOG": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_FIELD_CATALOG"
+    }
+  },
+  "MDG_BLOCK_FIELD": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_BLOCK_FIELD"
+    }
+  },
+  "MDG_FIELD_ALIAS": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_FIELD_ALIAS"
+    }
+  },
+  "MDG_PROCESS": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_PROCESS"
+    }
+  },
+  "MDG_PROCESS_ROLE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_PROCESS_ROLE"
+    }
+  },
+  "MDG_PROCESS_STEP": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_PROCESS_STEP"
+    }
+  },
+  "MDG_PROCESS_BLOCK": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_PROCESS_BLOCK"
+    }
+  },
+  "MDG_COUNTRY": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_COUNTRY"
+    }
+  },
+  "MDG_COUNTRY_ROLE_SCOPE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_COUNTRY_ROLE_SCOPE"
+    }
+  },
+  "MDG_IAS_GROUP_ROLE_MAP": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_IAS_GROUP_ROLE_MAP"
+    }
+  },
+  "MDG_FIELD_CONTROL_RULE_BASE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_FIELD_CONTROL_RULE_BASE"
+    }
+  },
+  "MDG_FIELD_CONTROL_RULE_COUNTRY": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_FIELD_CONTROL_RULE_COUNTRY"
+    }
+  },
+  "MDG_BLOCK_SAP_SOURCE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_BLOCK_SAP_SOURCE"
+    }
+  },
+  "MDG_REQUEST_HEADER": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_HEADER"
+    }
+  },
+  "MDG_REQUEST_FIELD_VALUE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_FIELD_VALUE"
+    }
+  },
+  "MDG_REQUEST_APPROVAL_TASK": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_APPROVAL_TASK"
+    }
+  },
+  "MDG_REQUEST_ACTION_LOG": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_ACTION_LOG"
+    }
+  },
+  "MDG_REQUEST_SAP_MESSAGE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_SAP_MESSAGE"
+    }
+  },
+  "MDG_SAP_TARGET": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_SAP_TARGET"
+    }
+  },
+  "MDG_SAP_PAYLOAD_MAP": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_SAP_PAYLOAD_MAP"
+    }
+  }
+}
