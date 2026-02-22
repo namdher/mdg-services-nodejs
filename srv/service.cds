@@ -44,6 +44,46 @@ service MDGService @(path:'/mdg') {
 
   action approveRequest(requestId : String(36), comment : String(1000)) returns LargeString;
   action rejectRequest(requestId : String(36), comment : String(1000)) returns LargeString;
+  action whoAmI() returns LargeString;
+  action getAvailableProcesses(countryCode : String(3)) returns LargeString;
+  type FormFieldRuntime : {
+    processCode    : String(80);
+    countryCode    : String(3);
+    roleCode       : String(30);
+    processRoleId  : UUID;
+
+    blockId        : UUID;
+    blockCode      : String(60);
+    blockName      : String(120);
+    blockOrder     : Integer;
+
+    fieldId        : UUID;
+    fieldCode      : String(80);
+    label          : String(200);
+
+    sapTable       : String(30);
+    sapField       : String(30);
+    dataType       : String(30);
+    length         : Integer;
+    decimals       : Integer;
+    isMulti        : Boolean;
+
+    fieldControl   : Integer;      // 0/1/3/7
+    defaultValue   : String(500);
+
+    vhDestination  : String(120);
+    vhService      : String(200);
+    vhEntitySet    : String(120);
+    vhKeyField     : String(60);
+    vhTextField    : String(60);
+    vhSearchFields : String(500);
+  };
+
+  action getFormDefinition(
+    processCode : String(80),
+    countryCode : String(3),
+    roleCode    : String(30)
+  ) returns array of FormFieldRuntime;
 }
 
 annotate MDGService.Requests with {

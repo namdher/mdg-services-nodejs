@@ -92,6 +92,13 @@
           "destination": "S4H-TECH",
           "requestTimeout": 30000
         }
+      },
+      "IAS_SCIM": {
+        "kind": "rest",
+        "credentials": {
+          "destination": "IAS_SCIM",
+          "requestTimeout": 30000
+        }
       }
     },
     "db": {

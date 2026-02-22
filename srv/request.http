@@ -18,4 +18,26 @@ GET {{server}}/mdg/VH_CustomerGen?$top=5
 GET {{server}}/v2/mdg/$metadata
 {{credentials}}
 
+### getFormDefinition (REQUESTER)
+POST {{server}}/mdg/getFormDefinition
+{{credentials}}
+Content-Type: application/json
+
+{
+  "processCode": "CUSTOMER_CREATION",
+  "countryCode": "CL",
+  "roleCode": "REQUESTER"
+}
+
+### getFormDefinition (APPROVER)
+POST {{server}}/mdg/getFormDefinition
+{{credentials}}
+Content-Type: application/json
+
+{
+  "processCode": "CUSTOMER_CREATION",
+  "countryCode": "CL",
+  "roleCode": "APPROVER"
+}
+
 

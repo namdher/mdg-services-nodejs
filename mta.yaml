@@ -65,7 +65,7 @@ modules:
           url: ~{srv-url}
           forwardAuthToken: true
       - name: mdg-services-nodejs-auth
-      - name: mdg-services-nodejs-approuter-destination
+      - name: mdg-services-nodejs-destination
     parameters:
       memory: 256M
       disk-quota: 256M
@@ -79,6 +79,7 @@ resources:
         tenant-mode: dedicated
       service: xsuaa
       service-plan: application
+      path: xs-security.json
 
   - name: mdg-services-nodejs-db
     type: com.sap.xs.hdi-container
@@ -111,10 +112,4 @@ resources:
     type: org.cloudfoundry.managed-service
     parameters:
       service: application-logs
-      service-plan: lite
-
-  - name: mdg-services-nodejs-approuter-destination
-    type: org.cloudfoundry.managed-service
-    parameters:
-      service: destination
       service-plan: lite
