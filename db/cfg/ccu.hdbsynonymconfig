@@ -130,5 +130,11 @@
       "schema": "CCU",
       "object": "MDG_SAP_PAYLOAD_MAP"
     }
+  },
+  "MDG_REQUEST_COMMENT": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_COMMENT"
+    }
   }
 }

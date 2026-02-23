@@ -189,6 +189,16 @@
   CREATEDAT : Timestamp @cds.on.insert: $now;
 }
 
+@cds.persistence.exists entity MDG_REQUEST_COMMENT {
+  key ID : UUID;
+  REQUEST_ID : UUID;                   // <- FK UUID
+  AUTHOR_USER : String(255);
+  AUTHOR_ROLE : String(30);
+  MESSAGE : LargeString;
+  CREATEDAT : Timestamp @cds.on.insert: $now;
+  CREATEDBY : String(255) @cds.on.insert: $user;
+}
+
 @cds.persistence.exists entity MDG_REQUEST_SAP_MESSAGE {
   key ID : UUID;
   REQUEST_ID : UUID;                   // <- FK UUID

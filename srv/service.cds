@@ -1,9 +1,10 @@
-using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE } from '../db/model';
+using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT } from '../db/model';
 
 service MDGService @(path:'/mdg') {
 
   entity Requests      as projection on MDG_REQUEST_HEADER;
   entity RequestValues as projection on MDG_REQUEST_FIELD_VALUE;
+  entity RequestComments as projection on MDG_REQUEST_COMMENT;
 
   @cds.persistence.skip @readonly entity VH_CustomerGen {
     key Partner : String(10);
@@ -42,8 +43,8 @@ service MDGService @(path:'/mdg') {
     key Taxtype : String(4);
   }
 
-  action approveRequest(requestId : String(36), comment : String(1000)) returns LargeString;
-  action rejectRequest(requestId : String(36), comment : String(1000)) returns LargeString;
+  action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
+  action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action whoAmI() returns LargeString;
   action getAvailableProcesses(countryCode : String(3)) returns LargeString;
   type FormFieldRuntime : {

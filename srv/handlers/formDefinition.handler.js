@@ -4,7 +4,7 @@ const cds = require('@sap/cds')
 // Tú ya tienes resolveGroups porque lo usaste en whoAmI.
 const { resolveGroups } = require('./auth.handler')
 
-const DEFAULT_FIELD_CONTROL = 7
+const DEFAULT_FIELD_CONTROL = 0
 
 async function _getProcess(tx, processCode) {
   const rows = await tx.run(
