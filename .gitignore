@@ -4,3 +4,4 @@ gen/
 .vscode/
 default-env.json
 *.env
+*.mtar

@@ -133,6 +133,7 @@
 @cds.persistence.exists entity MDG_REQUEST_HEADER {
   key ID : UUID;
   PROCESS_ID : UUID;                   // <- FK UUID
+  FRONT_CODE : String(30);
   MASTER_OBJECT_ID : UUID;             // <- FK UUID
   COUNTRY_CODE : String(3);
 

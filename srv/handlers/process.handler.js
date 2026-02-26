@@ -4,9 +4,10 @@ const { resolveGroups } = require('./auth.handler');
 
 async function getAvailableProcesses(req) {
   const { countryCode } = req.data;
+  const frontCode = typeof req.data?.frontCode === 'string' ? req.data.frontCode.trim() : '';
   const db = await cds.connect.to('db');
 
-  const { MDG_IAS_GROUP_ROLE_MAP, MDG_PROCESS, MDG_COUNTRY_ROLE_SCOPE } = db.entities;
+  const { MDG_IAS_GROUP_ROLE_MAP, MDG_PROCESS, MDG_COUNTRY_ROLE_SCOPE, MDG_PROCESS_ROLE } = db.entities;
 
   const { resolvedGroups } = await resolveGroups(req);
   if (!resolvedGroups.length) return JSON.stringify({ ok: true, processes: [] });
@@ -32,6 +33,28 @@ async function getAvailableProcesses(req) {
   );
 
   if (!allowedProcIds.size) return JSON.stringify({ ok: true, processes: [] });
+
+  if (frontCode) {
+    const requesterRoles = await db.run(
+      SELECT.from(MDG_PROCESS_ROLE).columns('PROCESS_ID')
+        .where({
+          PROCESS_ID: { in: [...allowedProcIds] },
+          ROLE_CODE: 'REQUESTER',
+          IS_ENABLED: true,
+          FRONT_CODE: frontCode
+        })
+    );
+
+    const frontFilteredProcIds = new Set(requesterRoles.map(r => r.PROCESS_ID));
+    if (!frontFilteredProcIds.size) return JSON.stringify({ ok: true, processes: [] });
+
+    for (const procId of [...allowedProcIds]) {
+      if (!frontFilteredProcIds.has(procId)) {
+        allowedProcIds.delete(procId);
+      }
+    }
+    if (!allowedProcIds.size) return JSON.stringify({ ok: true, processes: [] });
+  }
 
   const procs = await db.run(
     SELECT.from(MDG_PROCESS).columns('ID','PROCESS_CODE','NAME','MASTER_OBJECT_ID','WF_VERSION')

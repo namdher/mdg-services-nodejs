@@ -43,6 +43,17 @@ async function beforeCreateRequest(req) {
     req.reject(400, `Invalid initial STATUS: ${incomingStatus}. Requests must start in DRAFT.`);
   }
 
+  const requesterRoleRows = await tx.run(
+    `SELECT "FRONT_CODE"
+       FROM "MDG_PROCESS_ROLE"
+      WHERE "PROCESS_ID" = ?
+        AND "ROLE_CODE" = 'REQUESTER'
+        AND "IS_ENABLED" = true
+      ORDER BY "ID"`,
+    [req.data.PROCESS_ID]
+  );
+  req.data.FRONT_CODE = requesterRoleRows?.[0]?.FRONT_CODE ?? null;
+
   const ts = now();
   req.data.ID = req.data.ID || uuid();
   req.data.STATUS = STATUS.DRAFT;

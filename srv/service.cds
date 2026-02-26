@@ -1,8 +1,25 @@
-using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT } from '../db/model';
+using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT, MDG_PROCESS } from '../db/model';
 
 service MDGService @(path:'/mdg') {
 
   entity Requests      as projection on MDG_REQUEST_HEADER;
+  entity RequestsOverview as select from MDG_REQUEST_HEADER as r
+    left join MDG_PROCESS as p on p.ID = r.PROCESS_ID {
+      key r.ID as ID,
+      r.PROCESS_ID,
+      r.FRONT_CODE,
+      p.PROCESS_CODE as PROCESS_CODE,
+      p.NAME as PROCESS_NAME,
+      r.COUNTRY_CODE,
+      r.STATUS,
+      r.SUBJECT_ID,
+      r.SUBJECT_NAME,
+      r.CREATEDAT,
+      r.CREATEDBY,
+      r.MODIFIEDAT,
+      r.MODIFIEDBY,
+      r.ISDELETED
+  };
   entity RequestValues as projection on MDG_REQUEST_FIELD_VALUE;
   entity RequestComments as projection on MDG_REQUEST_COMMENT;
 
@@ -46,7 +63,7 @@ service MDGService @(path:'/mdg') {
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action whoAmI() returns LargeString;
-  action getAvailableProcesses(countryCode : String(3)) returns LargeString;
+  action getAvailableProcesses(countryCode : String(3), frontCode : String(30)) returns LargeString;
   type FormFieldRuntime : {
     processCode    : String(80);
     countryCode    : String(3);
@@ -95,4 +112,31 @@ annotate MDGService.Requests with {
       { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'Name1' }
     ]
   };
+};
+
+annotate MDGService.RequestsOverview with @UI.LineItem: [
+  { $Type: 'UI.DataField', Value: PROCESS_NAME },
+  { $Type: 'UI.DataField', Value: STATUS },
+  { $Type: 'UI.DataField', Value: SUBJECT_ID },
+  { $Type: 'UI.DataField', Value: SUBJECT_NAME },
+  { $Type: 'UI.DataField', Value: CREATEDAT },
+  { $Type: 'UI.DataField', Value: CREATEDBY },
+  { $Type: 'UI.DataField', Value: MODIFIEDAT }
+];
+
+annotate MDGService.RequestsOverview with @UI.SelectionFields: [
+  PROCESS_CODE,
+  STATUS,
+  SUBJECT_ID,
+  SUBJECT_NAME
+];
+
+annotate MDGService.RequestsOverview with {
+  PROCESS_NAME @Common.Label: 'Proceso';
+  STATUS @Common.Label: 'Estado';
+  SUBJECT_ID @Common.Label: 'ID Maestro';
+  SUBJECT_NAME @Common.Label: 'Nombre';
+  CREATEDAT @Common.Label: 'Creado';
+  CREATEDBY @Common.Label: 'Creado por';
+  MODIFIEDAT @Common.Label: 'Modificado';
 };

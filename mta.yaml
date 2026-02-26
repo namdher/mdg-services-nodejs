@@ -35,8 +35,8 @@ modules:
         properties:
           srv-url: ${default-url}
     parameters:
-      memory: 1024M
-      disk-quota: 2048M
+      memory: 4096M
+      disk-quota: 4096M
       buildpack: nodejs_buildpack
 
   - name: mdg-services-nodejs-db-deployer
@@ -67,8 +67,38 @@ modules:
       - name: mdg-services-nodejs-auth
       - name: mdg-services-nodejs-destination
     parameters:
-      memory: 256M
-      disk-quota: 256M
+      memory: 512M
+      disk-quota: 512M
+
+  - name: mdg-services-nodejs-content
+    type: com.sap.application.content
+    build-parameters:
+      no-source: true
+    requires:
+      - name: mdg-services-nodejs-auth
+        parameters:
+          service-key:
+            name: mdg-services-nodejs-auth-key
+      - name: mdg-services-nodejs-destination
+        parameters:
+          content-target: true
+      - name: srv-api
+    parameters:
+      content:
+        subaccount:
+          existing_destinations_policy: update
+          destinations:
+            - Name: MDG_CAP_V2
+              Description: MDG CAP OData V2 (token exchange)
+              URL: ~{srv-api/srv-url}
+              ServiceInstanceName: mdg-services-nodejs-auth
+              ServiceKeyName: mdg-services-nodejs-auth-key
+              Authentication: OAuth2UserTokenExchange
+              WebIDEEnabled: "true"
+              HTML5.DynamicDestination: "true"
+              WebIDEUsage: "odata_gen,odata_xs"
+              TrustAll: "true"
+              HTML5.Timeout: "120000"
 
 resources:
   - name: mdg-services-nodejs-auth
