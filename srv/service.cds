@@ -24,40 +24,158 @@ service MDGService @(path:'/mdg') {
   entity RequestComments as projection on MDG_REQUEST_COMMENT;
 
   @cds.persistence.skip @readonly entity VH_CustomerGen {
-    key Partner : String(10);
     key Kunnr   : String(10);
+    Partner     : String(10);
     Name1       : String(80);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerOrgV {
-    key Kunnr : String(10);
-    key Vkorg : String(4);
-    key Vtweg : String(2);
-    key Spart : String(2);
+    key ID    : String(200);
+    Kunnr     : String(10);
+    Vkorg     : String(4);
+    Vtweg     : String(2);
+    Spart     : String(2);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerSoc {
-    key Kunnr : String(10);
-    key Bukrs : String(4);
-    key Maber : String(2);
+    key ID    : String(200);
+    Kunnr     : String(10);
+    Bukrs     : String(4);
+    Maber     : String(2);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerCom {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Parnr       : String(10);
+    Name1       : String(80);
+    SMTP_ADDR   : String(241);
+    TEL_NUMBER  : String(30);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerEmp {
+    key ID    : String(200);
+    Kunnr     : String(10);
+    Bukrs     : String(4);
+    Ekorg     : String(4);
+    Vkorg     : String(4);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerBan {
-    key Kunnr : String(10);
-    key Banks : String(3);
-    key Bankl : String(15);
-    key Bankn : String(18);
+    key ID    : String(200);
+    Kunnr     : String(10);
+    Banks     : String(3);
+    Bankl     : String(15);
+    Bankn     : String(18);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerImp {
-    key Kunnr : String(10);
-    key Aland : String(3);
-    key Tatyp : String(4);
+    key ID    : String(200);
+    Kunnr     : String(10);
+    Aland     : String(3);
+    Tatyp     : String(4);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerNif {
-    key Kunnr : String(10);
-    key Taxtype : String(4);
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Taxtype     : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverGen {
+    key Kunnr   : String(10);
+    Name1       : String(80);
+    Name2       : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverRol {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Bp_Role     : String(6);
+    Dfval       : String(20);
+    Role        : String(4);
+    ValidFrom   : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverCom {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Vkorg       : String(4);
+    Vtweg       : String(2);
+    Spart       : String(2);
+    Ernam       : String(12);
+    Erdat       : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverImp {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Aland       : String(3);
+    Tatyp       : String(4);
+    Taxkd       : String(1);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverNif {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Taxtype     : String(4);
+    Taxnum      : String(20);
+    Taxnumxl    : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DriverAdi {
+    key Kunnr   : String(10);
+    Driver_Group: String(4);
+    ShortDriverId: String(6);
+  }
+
+  @cds.persistence.skip @readonly entity VH_BillToGen {
+    key Kunnr   : String(10);
+    Name1       : String(80);
+    Name2       : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_BillToCom {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Vkorg       : String(4);
+    Vtweg       : String(2);
+    Spart       : String(2);
+    Ernam       : String(12);
+    Erdat       : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_BillToImp {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Aland       : String(3);
+    Tatyp       : String(4);
+    Taxkd       : String(1);
+  }
+
+  @cds.persistence.skip @readonly entity VH_ShipToGen {
+    key Kunnr   : String(10);
+    Name1       : String(80);
+    Name2       : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_ShipToCom {
+    key ID      : String(200);
+    Kunnr       : String(10);
+    Vkorg       : String(4);
+    Vtweg       : String(2);
+    Spart       : String(2);
+    Ernam       : String(12);
+    Erdat       : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Resources {
+    key ID      : String(200);
+    Resuid      : String(10);
+    Simversid   : String(4);
+    Simsessid   : String(10);
+    Name        : String(120);
+    ResourceGroup : String(60);
   }
 
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
