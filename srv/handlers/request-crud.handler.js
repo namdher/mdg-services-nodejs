@@ -24,9 +24,36 @@ function getEntityId(req) {
 async function beforeCreateRequest(req) {
   const tx = cds.tx(req);
   const userId = currentUserId(req);
-
+  console.log("=== MDG DEBUG CREATE Requests ===");
+  console.log("req.user?.id =", req.user?.id);
+  console.log("has Authorization header =", !!req.headers?.authorization);
+  console.log("PROCESS_ID =", req.data?.PROCESS_ID, "COUNTRY_CODE =", req.data?.COUNTRY_CODE);
+  try {
+    const { resolveGroups } = require("./auth.handler");
+    const dbg = await resolveGroups(req);
+    console.log("resolvedGroups.length =", dbg?.resolvedGroups?.length);
+    console.log("resolvedGroups.sample =", (dbg?.resolvedGroups || []).slice(0, 30));
+  } catch (e) {
+    console.log("resolveGroups error:", e?.message);
+  }
+  console.log("=== END MDG DEBUG ===");
   if (!req.data.PROCESS_ID || !req.data.COUNTRY_CODE) {
     req.reject(400, 'PROCESS_ID and COUNTRY_CODE are required');
+  }
+
+  if (!req.data.MASTER_OBJECT_ID) {
+    const processRows = await tx.run(
+      `SELECT "MASTER_OBJECT_ID"
+         FROM "MDG_PROCESS"
+        WHERE "ID" = ?`,
+      [req.data.PROCESS_ID]
+    );
+    const masterObjectId = processRows?.[0]?.MASTER_OBJECT_ID;
+    if (masterObjectId) {
+      req.data.MASTER_OBJECT_ID = masterObjectId;
+    } else {
+      req.reject(400, 'MASTER_OBJECT_ID is required (process has no MASTER_OBJECT_ID)');
+    }
   }
 
   const assignments = await getUserRoleAssignments(tx, req, {

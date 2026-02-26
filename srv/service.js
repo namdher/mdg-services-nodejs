@@ -6,6 +6,7 @@ module.exports = cds.service.impl(async function () {
   const auth = require('./handlers/auth.handler');
   const process = require('./handlers/process.handler');
   const form = require('./handlers/formDefinition.handler');
+  const s4Metadata = require('./handlers/s4-metadata.handler');
   const requestCrud = require('./handlers/request-crud.handler');
   const comments = require('./handlers/comments.handler');
   const workflowActions = require('./handlers/workflow-action.handler');
@@ -21,6 +22,7 @@ module.exports = cds.service.impl(async function () {
   this.on('whoAmI', auth.whoAmI);
   this.on('getAvailableProcesses', process.getAvailableProcesses);
   this.on('getFormDefinition', form.getFormDefinition);
+  this.on('fetchS4Metadata', s4Metadata.fetchS4Metadata);
 
   requestCrud.register(this);
   comments.register(this);

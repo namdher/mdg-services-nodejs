@@ -40,4 +40,25 @@ Content-Type: application/json
   "roleCode": "APPROVER"
 }
 
+### getAvailableProcesses
+POST {{server}}/mdg/getAvailableProcesses
+{{credentials}}
+Content-Type: application/json
 
+{"countryCode": "CL", "frontCode": "MTO"}
+
+
+### CREATE
+POST {{server}}/mdg/Request
+{{credentials}}
+Content-Type: application/json
+
+{"PROCESS_ID":"941f1e91-1c71-5e5d-935e-d5e7a9bc9449","COUNTRY_CODE":"CL","SUBJECT_TYPE":"CUSTOMER","STATUS":"DRAFT","FRONT_CODE":"MTO"}
+
+### metadata
+POST {{server}}/mdg/fetchS4Metadata
+Content-Type: application/json
+
+{
+  "servicePath": "/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS"
+}

@@ -62,6 +62,7 @@ service MDGService @(path:'/mdg') {
 
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
+  action fetchS4Metadata(servicePath : String) returns LargeString;
   action whoAmI() returns LargeString;
   action getAvailableProcesses(countryCode : String(3), frontCode : String(30)) returns LargeString;
   type FormFieldRuntime : {
