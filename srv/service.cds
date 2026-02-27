@@ -178,8 +178,64 @@ service MDGService @(path:'/mdg') {
     ResourceGroup : String(60);
   }
 
+  @cds.persistence.skip @readonly entity VH_BU_GROUP {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_TAXKD {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_BU_GROUP {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_KTOKD {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_ANRED {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_BPKIND {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_KUKLA {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_TIME_ZONE {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_LANGU_CORR {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_DEFLT_COMM {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
+  action prefillCustomer(
+    requestId   : UUID,
+    subjectId   : String(60),
+    countryCode : String(3),
+    subjectFieldCode : String(80)
+  ) returns LargeString;
   action fetchS4Metadata(servicePath : String) returns LargeString;
   action whoAmI() returns LargeString;
   action getAvailableProcesses(countryCode : String(3), frontCode : String(30)) returns LargeString;

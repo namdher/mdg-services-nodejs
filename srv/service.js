@@ -6,6 +6,8 @@ module.exports = cds.service.impl(async function () {
   const auth = require('./handlers/auth.handler');
   const process = require('./handlers/process.handler');
   const form = require('./handlers/formDefinition.handler');
+  const prefill = require('./handlers/prefill.handler');
+  const internalVh = require('./handlers/internal-vh.handler');
   const s4Metadata = require('./handlers/s4-metadata.handler');
   const requestCrud = require('./handlers/request-crud.handler');
   const comments = require('./handlers/comments.handler');
@@ -32,10 +34,21 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_ShipToGen', vh.readShipToGen);
   this.on('READ', 'VH_ShipToCom', vh.readShipToCom);
   this.on('READ', 'VH_Resources', vh.readResources);
+  this.on('READ', 'VH_BU_GROUP', internalVh.readVhBuGroup);
+  this.on('READ', 'VH_Internal_TAXKD', internalVh.readVhInternalTaxkd);
+  this.on('READ', 'VH_Internal_BU_GROUP', internalVh.readVhInternalBuGroup);
+  this.on('READ', 'VH_Internal_KTOKD', internalVh.readVhInternalKtokd);
+  this.on('READ', 'VH_Internal_ANRED', internalVh.readVhInternalAnred);
+  this.on('READ', 'VH_Internal_BPKIND', internalVh.readVhInternalBpkind);
+  this.on('READ', 'VH_Internal_KUKLA', internalVh.readVhInternalKukla);
+  this.on('READ', 'VH_Internal_TIME_ZONE', internalVh.readVhInternalTimeZone);
+  this.on('READ', 'VH_Internal_LANGU_CORR', internalVh.readVhInternalLanguCorr);
+  this.on('READ', 'VH_Internal_DEFLT_COMM', internalVh.readVhInternalDefltComm);
 
   this.on('whoAmI', auth.whoAmI);
   this.on('getAvailableProcesses', process.getAvailableProcesses);
   this.on('getFormDefinition', form.getFormDefinition);
+  this.on('prefillCustomer', prefill.prefillCustomer);
   this.on('fetchS4Metadata', s4Metadata.fetchS4Metadata);
 
   requestCrud.register(this);
