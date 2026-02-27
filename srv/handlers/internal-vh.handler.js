@@ -48,6 +48,14 @@ const DATA = {
     { CODE: 'EMAIL', TEXT: 'Email' },
     { CODE: 'PHONE', TEXT: 'Phone' },
     { CODE: 'FAX', TEXT: 'Fax' }
+  ],
+  VH_Status: [
+    { CODE: 'DRAFT', TEXT: 'Borrador' },
+    { CODE: 'IN_REVIEW', TEXT: 'En revisión' },
+    { CODE: 'REWORK', TEXT: 'Devuelto' },
+    { CODE: 'APPROVED', TEXT: 'Aprobado' },
+    { CODE: 'SUBMITTED', TEXT: 'Enviado' },
+    { CODE: 'ERROR', TEXT: 'Error' }
   ]
 };
 
@@ -67,5 +75,6 @@ module.exports = {
   readVhInternalKukla: readStatic('VH_Internal_KUKLA'),
   readVhInternalTimeZone: readStatic('VH_Internal_TIME_ZONE'),
   readVhInternalLanguCorr: readStatic('VH_Internal_LANGU_CORR'),
-  readVhInternalDefltComm: readStatic('VH_Internal_DEFLT_COMM')
+  readVhInternalDefltComm: readStatic('VH_Internal_DEFLT_COMM'),
+  readVhStatus: readStatic('VH_Status')
 };

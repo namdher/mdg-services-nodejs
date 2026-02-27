@@ -21,6 +21,81 @@ function getEntityId(req) {
   return req.data?.ID || req.params?.[0]?.ID;
 }
 
+function toLocalIsoDate(value = new Date()) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function resolveDefaultValue(defaultBase) {
+  if (defaultBase === null || defaultBase === undefined) return null;
+  const raw = String(defaultBase);
+  const token = raw.trim().toUpperCase();
+  if (token === '$NOW_DATE' || token === 'TODAY') {
+    return toLocalIsoDate();
+  }
+  return raw;
+}
+
+async function applyDefaultsToRequest(tx, requestId, processId, countryCode, processRoleId, userId = 'system') {
+  if (!requestId || !processId || !processRoleId) return 0;
+
+  const scopedDefaults = await tx.run(
+    `SELECT DISTINCT
+        fc."ID"          AS "FIELD_ID",
+        fcb."DEFAULT_BASE" AS "DEFAULT_BASE"
+       FROM "MDG_PROCESS_BLOCK" pb
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = bf."FIELD_ID"
+       JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."FIELD_ID" = fc."ID"
+        AND fcb."PROCESS_ROLE_ID" = ?
+      WHERE pb."PROCESS_ID" = ?
+        AND fcb."DEFAULT_BASE" IS NOT NULL
+        AND LENGTH(TRIM(fcb."DEFAULT_BASE")) > 0`,
+    [processRoleId, processId]
+  );
+
+  if (!scopedDefaults.length) {
+    console.log(`[MDG_DEFAULTS] request=${requestId} process=${processId} country=${countryCode} inserted=0`);
+    return 0;
+  }
+
+  const fieldIds = scopedDefaults.map((row) => row.FIELD_ID);
+  const inClause = fieldIds.map(() => '?').join(',');
+  const existingRows = await tx.run(
+    `SELECT "FIELD_ID"
+       FROM "MDG_REQUEST_FIELD_VALUE"
+      WHERE "REQUEST_ID" = ?
+        AND "FIELD_ID" IN (${inClause})`,
+    [requestId, ...fieldIds]
+  );
+  const existingFieldIds = new Set(existingRows.map((row) => row.FIELD_ID));
+
+  let inserted = 0;
+  const ts = now();
+  for (const row of scopedDefaults) {
+    if (existingFieldIds.has(row.FIELD_ID)) continue;
+
+    const resolved = resolveDefaultValue(row.DEFAULT_BASE);
+    if (resolved === null || resolved === '') continue;
+
+    await tx.run(
+      `INSERT INTO "MDG_REQUEST_FIELD_VALUE"
+       ("ID", "REQUEST_ID", "FIELD_ID", "LINE_NO", "VALUE", "MODIFIEDAT", "MODIFIEDBY")
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [uuid(), requestId, row.FIELD_ID, 1, resolved, ts, userId]
+    );
+    inserted += 1;
+  }
+
+  console.log(`[MDG_DEFAULTS] request=${requestId} process=${processId} country=${countryCode} inserted=${inserted}`);
+  return inserted;
+}
+
 async function beforeCreateRequest(req) {
   const tx = cds.tx(req);
   const userId = currentUserId(req);
@@ -41,19 +116,29 @@ async function beforeCreateRequest(req) {
     req.reject(400, 'PROCESS_ID and COUNTRY_CODE are required');
   }
 
+  let processCode = null;
   if (!req.data.MASTER_OBJECT_ID) {
     const processRows = await tx.run(
-      `SELECT "MASTER_OBJECT_ID"
+      `SELECT "MASTER_OBJECT_ID", "PROCESS_CODE"
          FROM "MDG_PROCESS"
         WHERE "ID" = ?`,
       [req.data.PROCESS_ID]
     );
     const masterObjectId = processRows?.[0]?.MASTER_OBJECT_ID;
+    processCode = processRows?.[0]?.PROCESS_CODE || null;
     if (masterObjectId) {
       req.data.MASTER_OBJECT_ID = masterObjectId;
     } else {
       req.reject(400, 'MASTER_OBJECT_ID is required (process has no MASTER_OBJECT_ID)');
     }
+  } else {
+    const processRows = await tx.run(
+      `SELECT "PROCESS_CODE"
+         FROM "MDG_PROCESS"
+        WHERE "ID" = ?`,
+      [req.data.PROCESS_ID]
+    );
+    processCode = processRows?.[0]?.PROCESS_CODE || null;
   }
 
   const assignments = await getUserRoleAssignments(tx, req, {
@@ -71,7 +156,7 @@ async function beforeCreateRequest(req) {
   }
 
   const requesterRoleRows = await tx.run(
-    `SELECT "FRONT_CODE"
+    `SELECT "ID", "FRONT_CODE"
        FROM "MDG_PROCESS_ROLE"
       WHERE "PROCESS_ID" = ?
         AND "ROLE_CODE" = 'REQUESTER'
@@ -79,7 +164,12 @@ async function beforeCreateRequest(req) {
       ORDER BY "ID"`,
     [req.data.PROCESS_ID]
   );
-  req.data.FRONT_CODE = requesterRoleRows?.[0]?.FRONT_CODE ?? null;
+  const requesterRole = requesterRoleRows?.[0] || null;
+  req.data.FRONT_CODE = requesterRole?.FRONT_CODE ?? null;
+  req._defaultsContext = {
+    processCode,
+    processRoleId: requesterRole?.ID || null
+  };
 
   const ts = now();
   req.data.ID = req.data.ID || uuid();
@@ -92,6 +182,28 @@ async function beforeCreateRequest(req) {
   req.data.CREATEDBY = req.data.CREATEDBY || userId;
   req.data.MODIFIEDAT = ts;
   req.data.MODIFIEDBY = userId;
+}
+
+async function afterCreateRequest(_, req) {
+  const tx = cds.tx(req);
+  const userId = currentUserId(req);
+
+  const requestId = req.data?.ID;
+  const processId = req.data?.PROCESS_ID;
+  const countryCode = req.data?.COUNTRY_CODE;
+  const frontCode = typeof req.data?.FRONT_CODE === 'string' ? req.data.FRONT_CODE.trim().toUpperCase() : '';
+  const status = normalizeStatus(req.data?.STATUS);
+  const processCode = typeof req._defaultsContext?.processCode === 'string'
+    ? req._defaultsContext.processCode.trim().toUpperCase()
+    : '';
+  const processRoleId = req._defaultsContext?.processRoleId || null;
+
+  if (!requestId || !processId || !countryCode || !processRoleId) return;
+  if (status !== STATUS.DRAFT) return;
+  if (frontCode !== 'MTO') return;
+  if (processCode !== 'CUSTOMER_CREATION') return;
+
+  await applyDefaultsToRequest(tx, requestId, processId, countryCode, processRoleId, userId);
 }
 
 async function beforeUpdateRequest(req) {
@@ -266,6 +378,7 @@ async function beforeUpsertRequestValue(req) {
 
 function register(service) {
   service.before('CREATE', 'Requests', beforeCreateRequest);
+  service.after('CREATE', 'Requests', afterCreateRequest);
   service.before('UPDATE', 'Requests', beforeUpdateRequest);
   service.after('UPDATE', 'Requests', afterUpdateRequest);
   service.on('DELETE', 'Requests', onDeleteRequest);

@@ -12,6 +12,16 @@ service MDGService @(path:'/mdg') {
       p.NAME as PROCESS_NAME,
       r.COUNTRY_CODE,
       r.STATUS,
+      cast(
+        case
+          when r.STATUS = 'DRAFT' then 'Borrador'
+          when r.STATUS = 'IN_REVIEW' then 'En revisión'
+          when r.STATUS = 'REWORK' then 'Devuelto'
+          when r.STATUS = 'APPROVED' then 'Aprobado'
+          when r.STATUS = 'SUBMITTED' then 'Enviado'
+          else r.STATUS
+        end
+      as String(30)) as STATUS_TEXT,
       r.SUBJECT_ID,
       r.SUBJECT_NAME,
       r.CREATEDAT,
@@ -228,6 +238,17 @@ service MDGService @(path:'/mdg') {
     TEXT     : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_Status {
+    key CODE : String(30);
+    TEXT     : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_AllowedProcesses {
+    key ID          : UUID;
+    PROCESS_CODE    : String(80);
+    NAME            : String(150);
+  }
+
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action prefillCustomer(
@@ -290,28 +311,61 @@ annotate MDGService.Requests with {
 };
 
 annotate MDGService.RequestsOverview with @UI.LineItem: [
-  { $Type: 'UI.DataField', Value: PROCESS_NAME },
-  { $Type: 'UI.DataField', Value: STATUS },
-  { $Type: 'UI.DataField', Value: SUBJECT_ID },
-  { $Type: 'UI.DataField', Value: SUBJECT_NAME },
-  { $Type: 'UI.DataField', Value: CREATEDAT },
-  { $Type: 'UI.DataField', Value: CREATEDBY },
-  { $Type: 'UI.DataField', Value: MODIFIEDAT }
+  { $Type: 'UI.DataField', Value: PROCESS_NAME, Label: 'Proceso' },
+  { $Type: 'UI.DataField', Value: STATUS, Label: 'Estado' },
+  { $Type: 'UI.DataField', Value: SUBJECT_ID, Label: 'ID Maestro' },
+  { $Type: 'UI.DataField', Value: SUBJECT_NAME, Label: 'Nombre' },
+  { $Type: 'UI.DataField', Value: CREATEDAT, Label: 'Creado' },
+  { $Type: 'UI.DataField', Value: CREATEDBY, Label: 'Creado por' },
+  { $Type: 'UI.DataField', Value: MODIFIEDAT, Label: 'Modificado' }
 ];
 
 annotate MDGService.RequestsOverview with @UI.SelectionFields: [
-  PROCESS_CODE,
+  PROCESS_ID,
   STATUS,
-  SUBJECT_ID,
-  SUBJECT_NAME
+  SUBJECT_ID
 ];
 
 annotate MDGService.RequestsOverview with {
+  PROCESS_CODE @UI.Hidden: true;
+  PROCESS_ID @Common.Label: 'Proceso';
+  PROCESS_ID @Common.ValueList: {
+    CollectionPath: 'VH_AllowedProcesses',
+    Parameters: [
+      { $Type: 'Common.ValueListParameterInOut', LocalDataProperty: PROCESS_ID, ValueListProperty: 'ID' },
+      { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'PROCESS_CODE' },
+      { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'NAME' }
+    ]
+  };
+  PROCESS_ID @Common.Text: PROCESS_NAME;
+  PROCESS_ID @Common.TextArrangement: #TextOnly;
   PROCESS_NAME @Common.Label: 'Proceso';
   STATUS @Common.Label: 'Estado';
+  STATUS @Common.ValueListWithFixedValues: true;
+  STATUS @Common.ValueList: {
+    CollectionPath: 'VH_Status',
+    Parameters: [
+      { $Type: 'Common.ValueListParameterInOut', LocalDataProperty: STATUS, ValueListProperty: 'CODE' },
+      { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'TEXT' }
+    ]
+  };
+  STATUS @Common.Text: STATUS_TEXT;
+  STATUS @Common.TextArrangement: #TextOnly;
+  STATUS_TEXT @Common.Label: 'Estado';
   SUBJECT_ID @Common.Label: 'ID Maestro';
   SUBJECT_NAME @Common.Label: 'Nombre';
   CREATEDAT @Common.Label: 'Creado';
   CREATEDBY @Common.Label: 'Creado por';
   MODIFIEDAT @Common.Label: 'Modificado';
+};
+
+annotate MDGService.VH_Status with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Estado';
+};
+
+annotate MDGService.VH_AllowedProcesses with {
+  ID @Common.Label: 'ID Proceso';
+  PROCESS_CODE @Common.Label: 'Código Proceso';
+  NAME @Common.Label: 'Proceso';
 };
