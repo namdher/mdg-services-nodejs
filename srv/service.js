@@ -17,6 +17,7 @@ module.exports = cds.service.impl(async function () {
 
   // Turno 3: wire VH_* entitysets to S/4 via destination S4H-TECH
   this.on('READ', 'VH_CustomerGen', vh.readCustomerGen);
+  this.on('READ', 'VH_CustomerClassification', vh.readCustomerClassification);
   this.on('READ', 'VH_CustomerOrgV', vh.readCustomerOrgV);
   this.on('READ', 'VH_CustomerSoc', vh.readCustomerSoc);
   this.on('READ', 'VH_CustomerCom', vh.readCustomerCom);
@@ -38,6 +39,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_Resources', vh.readResources);
   this.on('READ', 'VH_BU_GROUP', internalVh.readVhBuGroup);
   this.on('READ', 'VH_Internal_TAXKD', internalVh.readVhInternalTaxkd);
+  this.on('READ', 'VH_Internal_TATYP', internalVh.readVhInternalTatyp);
   this.on('READ', 'VH_Internal_BU_GROUP', internalVh.readVhInternalBuGroup);
   this.on('READ', 'VH_Internal_KTOKD', internalVh.readVhInternalKtokd);
   this.on('READ', 'VH_Internal_ANRED', internalVh.readVhInternalAnred);
@@ -46,6 +48,9 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_Internal_TIME_ZONE', internalVh.readVhInternalTimeZone);
   this.on('READ', 'VH_Internal_LANGU_CORR', internalVh.readVhInternalLanguCorr);
   this.on('READ', 'VH_Internal_DEFLT_COMM', internalVh.readVhInternalDefltComm);
+  this.on('READ', 'VH_Internal_ZZBKVID', internalVh.readVhInternalZzbkvid);
+  this.on('READ', 'VH_Internal_MAHNA', internalVh.readVhInternalMahna);
+  this.on('READ', 'VH_Internal_MAHNS', internalVh.readVhInternalMahns);
   this.on('READ', 'VH_Status', internalVh.readVhStatus);
   this.on('READ', 'VH_AllowedProcesses', overviewVh.readVhAllowedProcesses);
 
@@ -53,6 +58,7 @@ module.exports = cds.service.impl(async function () {
   this.before('READ', 'Requests', readAccess.beforeReadRequests);
   this.before('READ', 'RequestValues', readAccess.beforeReadRequestValues);
   this.before('READ', 'RequestComments', readAccess.beforeReadRequestComments);
+  this.before('READ', 'RequestFieldChangeLogs', readAccess.beforeReadRequestFieldChangeLogs);
 
   this.on('whoAmI', auth.whoAmI);
   this.on('getAvailableProcesses', process.getAvailableProcesses);

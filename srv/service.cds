@@ -1,4 +1,4 @@
-using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT, MDG_PROCESS } from '../db/model';
+using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT, MDG_REQUEST_FIELD_CHANGE_LOG, MDG_FIELD_CATALOG, MDG_PROCESS } from '../db/model';
 
 service MDGService @(path:'/mdg') {
 
@@ -32,6 +32,64 @@ service MDGService @(path:'/mdg') {
   };
   entity RequestValues as projection on MDG_REQUEST_FIELD_VALUE;
   entity RequestComments as projection on MDG_REQUEST_COMMENT;
+  @readonly entity RequestFieldChangeLogs as select from MDG_REQUEST_FIELD_CHANGE_LOG as l
+    left join MDG_FIELD_CATALOG as fc on fc.ID = l.FIELD_ID {
+      key l.ID,
+      l.REQUEST_ID,
+      l.FIELD_ID,
+      l.FIELD_CODE,
+      cast(
+        case
+          when fc.BUSINESS_LABEL is not null and length(trim(fc.BUSINESS_LABEL)) > 0 then fc.BUSINESS_LABEL
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.CREATE' then 'Evento de creación'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' then 'Estado'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.SUBJECT_ID' then 'Cliente'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.SUBJECT_TYPE' then 'Tipo de sujeto'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.ISDELETED' then 'Eliminación de solicitud'
+          when l.FIELD_CODE = 'MDG_REQUEST_COMMENT.MESSAGE' then 'Comentario'
+          else l.FIELD_CODE
+        end
+      as String(200)) as FIELD_LABEL,
+      l.LINE_NO,
+      l.OLD_VALUE,
+      l.NEW_VALUE,
+      l.CHANGE_TYPE,
+      cast(
+        case
+          when l.CHANGE_TYPE = 'CREATE' then 'Creación'
+          when l.CHANGE_TYPE = 'UPDATE' then 'Actualización'
+          when l.CHANGE_TYPE = 'DELETE' then 'Eliminación'
+          else l.CHANGE_TYPE
+        end
+      as String(40)) as CHANGE_TYPE_TEXT,
+      l.CHANGED_AT,
+      l.CHANGED_BY,
+      l.CHANGED_ROLE,
+      cast(
+        case
+          when l.CHANGED_ROLE = 'REQUESTER' then 'Solicitante'
+          when l.CHANGED_ROLE = 'ENRICHER' then 'Enriquecedor'
+          when l.CHANGED_ROLE = 'APPROVER' then 'Manager'
+          else l.CHANGED_ROLE
+        end
+      as String(40)) as CHANGED_ROLE_TEXT,
+      l.SOURCE,
+      cast(
+        case
+          when l.SOURCE = 'REQUEST_CREATE' then 'Creación solicitud'
+          when l.SOURCE = 'REQUEST_UPDATE' then 'Actualización solicitud'
+          when l.SOURCE = 'REQUEST_DELETE' then 'Eliminación solicitud'
+          when l.SOURCE = 'REQUEST_VALUE_CREATE' then 'Creación valor'
+          when l.SOURCE = 'REQUEST_VALUE_UPDATE' then 'Actualización valor'
+          when l.SOURCE = 'REQUEST_VALUE_DELETE' then 'Eliminación valor'
+          when l.SOURCE = 'REQUEST_COMMENT_CREATE' then 'Comentario'
+          when l.SOURCE = 'WORKFLOW_APPROVE' then 'Aprobación'
+          when l.SOURCE = 'WORKFLOW_REJECT' then 'Rechazo'
+          when l.SOURCE = 'PREFILL_CUSTOMER' then 'Prefill cliente'
+          else l.SOURCE
+        end
+      as String(80)) as SOURCE_TEXT
+  };
 
   @cds.persistence.skip @readonly entity VH_CustomerGen {
     key Kunnr   : String(10);
@@ -90,6 +148,11 @@ service MDGService @(path:'/mdg') {
     key ID      : String(200);
     Kunnr       : String(10);
     Taxtype     : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerClassification {
+    key CustomerClassification      : String(2);
+    CustomerClassification_Text     : String(20);
   }
 
   @cds.persistence.skip @readonly entity VH_DriverGen {
@@ -198,6 +261,11 @@ service MDGService @(path:'/mdg') {
     TEXT     : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_Internal_TATYP {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_Internal_BU_GROUP {
     key CODE : String(40);
     TEXT     : String(120);
@@ -234,6 +302,21 @@ service MDGService @(path:'/mdg') {
   }
 
   @cds.persistence.skip @readonly entity VH_Internal_DEFLT_COMM {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_ZZBKVID {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_MAHNA {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_Internal_MAHNS {
     key CODE : String(40);
     TEXT     : String(120);
   }
@@ -368,4 +451,47 @@ annotate MDGService.VH_AllowedProcesses with {
   ID @Common.Label: 'ID Proceso';
   PROCESS_CODE @Common.Label: 'Código Proceso';
   NAME @Common.Label: 'Proceso';
+};
+
+annotate MDGService.RequestFieldChangeLogs with @UI.LineItem: [
+  { $Type: 'UI.DataField', Value: REQUEST_ID, Label: 'Solicitud' },
+  { $Type: 'UI.DataField', Value: FIELD_LABEL, Label: 'Campo' },
+  { $Type: 'UI.DataField', Value: CHANGE_TYPE_TEXT, Label: 'Tipo cambio' },
+  { $Type: 'UI.DataField', Value: OLD_VALUE, Label: 'Valor anterior' },
+  { $Type: 'UI.DataField', Value: NEW_VALUE, Label: 'Valor nuevo' },
+  { $Type: 'UI.DataField', Value: CHANGED_BY, Label: 'Usuario' },
+  { $Type: 'UI.DataField', Value: CHANGED_ROLE_TEXT, Label: 'Rol' },
+  { $Type: 'UI.DataField', Value: SOURCE_TEXT, Label: 'Origen' },
+  { $Type: 'UI.DataField', Value: CHANGED_AT, Label: 'Fecha' }
+];
+
+annotate MDGService.RequestFieldChangeLogs with @UI.SelectionFields: [
+  REQUEST_ID,
+  FIELD_CODE,
+  CHANGE_TYPE,
+  CHANGED_BY,
+  SOURCE,
+  CHANGED_AT
+];
+
+annotate MDGService.RequestFieldChangeLogs with {
+  REQUEST_ID @Common.Label: 'Solicitud';
+  FIELD_ID @Common.Label: 'ID Campo';
+  FIELD_CODE @UI.Hidden: true;
+  FIELD_CODE @Common.Label: 'Campo';
+  FIELD_LABEL @Common.Label: 'Campo';
+  LINE_NO @Common.Label: 'Línea';
+  OLD_VALUE @Common.Label: 'Valor anterior';
+  NEW_VALUE @Common.Label: 'Valor nuevo';
+  CHANGE_TYPE @UI.Hidden: true;
+  CHANGE_TYPE @Common.Label: 'Tipo cambio';
+  CHANGE_TYPE_TEXT @Common.Label: 'Tipo cambio';
+  CHANGED_AT @Common.Label: 'Fecha';
+  CHANGED_BY @Common.Label: 'Usuario';
+  CHANGED_ROLE @UI.Hidden: true;
+  CHANGED_ROLE @Common.Label: 'Rol';
+  CHANGED_ROLE_TEXT @Common.Label: 'Rol';
+  SOURCE @UI.Hidden: true;
+  SOURCE @Common.Label: 'Origen';
+  SOURCE_TEXT @Common.Label: 'Origen';
 };

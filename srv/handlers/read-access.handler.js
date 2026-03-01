@@ -112,9 +112,16 @@ async function beforeReadRequestComments(req) {
   addInValues(req, 'REQUEST_ID', allowedRequestIds);
 }
 
+async function beforeReadRequestFieldChangeLogs(req) {
+  const tx = cds.tx(req);
+  const allowedRequestIds = await getAllowedRequestIds(tx, req);
+  addInValues(req, 'REQUEST_ID', allowedRequestIds);
+}
+
 module.exports = {
   beforeReadRequestsOverview,
   beforeReadRequests,
   beforeReadRequestValues,
-  beforeReadRequestComments
+  beforeReadRequestComments,
+  beforeReadRequestFieldChangeLogs
 };

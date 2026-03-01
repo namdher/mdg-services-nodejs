@@ -11,6 +11,7 @@ const {
   resolveEditorRoleFromStatus,
   uuid
 } = require('./_lib/mdg-workflow.util');
+const { areValuesEqual, insertRequestFieldChangeLog } = require('./_lib/request-change-log.util');
 
 const CUSTOMER_PREFILL_SOURCES = [
   { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS', entitySet: 'zcds_clientes_gen', required: true },
@@ -214,7 +215,7 @@ async function prefillCustomer(req) {
 
     const fieldCode = `${field.SAP_TABLE}.${field.SAP_FIELD}`;
     valuesByFieldCode.set(fieldCode, value);
-    upsertCandidates.push({ fieldId: field.FIELD_ID, value });
+    upsertCandidates.push({ fieldId: field.FIELD_ID, value, fieldCode });
   }
 
   if (!valuesByFieldCode.size) {
@@ -230,7 +231,7 @@ async function prefillCustomer(req) {
   const fieldIds = finalCandidates.map((x) => x.fieldId);
   const inClause = fieldIds.map(() => '?').join(',');
   const existingRows = await tx.run(
-    `SELECT "ID", "FIELD_ID"
+    `SELECT "ID", "FIELD_ID", "VALUE"
        FROM "MDG_REQUEST_FIELD_VALUE"
       WHERE "REQUEST_ID" = ?
         AND "FIELD_ID" IN (${inClause})`,
@@ -242,6 +243,7 @@ async function prefillCustomer(req) {
   for (const candidate of finalCandidates) {
     const current = existingByFieldId.get(candidate.fieldId);
     if (current) {
+      if (areValuesEqual(current.VALUE, candidate.value)) continue;
       await tx.run(
         `UPDATE "MDG_REQUEST_FIELD_VALUE"
             SET "VALUE" = ?,
@@ -250,6 +252,18 @@ async function prefillCustomer(req) {
           WHERE "ID" = ?`,
         [candidate.value, now(), userId, current.ID]
       );
+      await insertRequestFieldChangeLog(tx, {
+        requestId,
+        fieldId: candidate.fieldId,
+        fieldCode: candidate.fieldCode || `FIELD_ID:${candidate.fieldId}`,
+        lineNo: 1,
+        oldValue: current.VALUE,
+        newValue: candidate.value,
+        changeType: 'UPDATE',
+        changedBy: userId,
+        changedRole: editor.ROLE_CODE,
+        source: 'PREFILL_CUSTOMER'
+      });
       updated += 1;
       continue;
     }
@@ -260,6 +274,18 @@ async function prefillCustomer(req) {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [uuid(), requestId, candidate.fieldId, 1, candidate.value, now(), userId]
     );
+    await insertRequestFieldChangeLog(tx, {
+      requestId,
+      fieldId: candidate.fieldId,
+      fieldCode: candidate.fieldCode || `FIELD_ID:${candidate.fieldId}`,
+      lineNo: 1,
+      oldValue: null,
+      newValue: candidate.value,
+      changeType: 'CREATE',
+      changedBy: userId,
+      changedRole: editor.ROLE_CODE,
+      source: 'PREFILL_CUSTOMER'
+    });
     updated += 1;
   }
 

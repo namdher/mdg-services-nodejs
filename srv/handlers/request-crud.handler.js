@@ -1,4 +1,5 @@
 const cds = require('@sap/cds');
+const { s4Get } = require('./_lib/s4.client');
 const {
   FIELD_CONTROL,
   ROLE_CODES,
@@ -16,9 +17,89 @@ const {
   uuid,
   validateMandatoryFieldsOnSubmit
 } = require('./_lib/mdg-workflow.util');
+const {
+  SYSTEM_FIELD_ID,
+  areValuesEqual,
+  insertRequestFieldChangeLog
+} = require('./_lib/request-change-log.util');
 
 function getEntityId(req) {
   return req.data?.ID || req.params?.[0]?.ID;
+}
+
+function escapeODataString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+async function getFieldCodeById(tx, fieldId) {
+  if (!fieldId) return null;
+  const rows = await tx.run(
+    `SELECT "FIELD_CODE"
+       FROM "MDG_FIELD_CATALOG"
+      WHERE "ID" = ?`,
+    [fieldId]
+  );
+  return rows?.[0]?.FIELD_CODE || null;
+}
+
+async function getRequestValueDetailById(tx, valueId) {
+  const rows = await tx.run(
+    `SELECT "ID", "REQUEST_ID", "FIELD_ID", "LINE_NO", "VALUE"
+       FROM "MDG_REQUEST_FIELD_VALUE"
+      WHERE "ID" = ?`,
+    [valueId]
+  );
+  return rows?.[0] || null;
+}
+
+function isCustomerKunnrField(fieldCode) {
+  return typeof fieldCode === 'string' && /\.KUNNR$/i.test(fieldCode.trim());
+}
+
+async function resolveCustomerNameByKunnr(kunnr) {
+  if (!kunnr) return null;
+  const escaped = escapeODataString(kunnr);
+  const rows = await s4Get({
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
+    entitySet: 'zcds_clientes_gen',
+    query: { $filter: `Kunnr eq '${escaped}'`, $top: 1 }
+  });
+  const name = rows?.[0]?.Name1;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
+
+async function syncRequestSubjectFromRequestValue(tx, { requestId, fieldId, rawValue, userId }) {
+  const value = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue || '').trim();
+  if (!requestId || !fieldId || !value) return;
+
+  const fieldCode = await getFieldCodeById(tx, fieldId);
+  if (!isCustomerKunnrField(fieldCode)) return;
+
+  const requestRows = await tx.run(
+    `SELECT "SUBJECT_NAME"
+       FROM "MDG_REQUEST_HEADER"
+      WHERE "ID" = ?`,
+    [requestId]
+  );
+  const currentSubjectName = requestRows?.[0]?.SUBJECT_NAME ?? null;
+
+  let resolvedSubjectName = null;
+  try {
+    resolvedSubjectName = await resolveCustomerNameByKunnr(value);
+  } catch (err) {
+    console.warn(`[MDG_SUBJECT_SYNC] customer lookup failed for KUNNR=${value}: ${err?.message || err}`);
+  }
+
+  await tx.run(
+    `UPDATE "MDG_REQUEST_HEADER"
+        SET "SUBJECT_ID" = ?,
+            "SUBJECT_TYPE" = 'CUSTOMER',
+            "SUBJECT_NAME" = ?,
+            "MODIFIEDAT" = ?,
+            "MODIFIEDBY" = ?
+      WHERE "ID" = ?`,
+    [value, resolvedSubjectName || currentSubjectName, now(), userId, requestId]
+  );
 }
 
 function toLocalIsoDate(value = new Date()) {
@@ -149,6 +230,7 @@ async function beforeCreateRequest(req) {
   if (!assignments.some((a) => a.ROLE_CODE === ROLE_CODES.REQUESTER)) {
     req.reject(403, 'Only REQUESTER can create requests for this process/country');
   }
+  req._requestAuditRoleCode = ROLE_CODES.REQUESTER;
 
   const incomingStatus = normalizeStatus(req.data.STATUS);
   if (incomingStatus && incomingStatus !== STATUS.DRAFT) {
@@ -198,6 +280,18 @@ async function afterCreateRequest(_, req) {
     : '';
   const processRoleId = req._defaultsContext?.processRoleId || null;
 
+  await insertRequestFieldChangeLog(tx, {
+    requestId,
+    fieldId: SYSTEM_FIELD_ID,
+    fieldCode: 'MDG_REQUEST_HEADER.CREATE',
+    oldValue: null,
+    newValue: null,
+    changeType: 'CREATE',
+    changedBy: userId,
+    changedRole: req._requestAuditRoleCode || ROLE_CODES.REQUESTER,
+    source: 'REQUEST_CREATE'
+  });
+
   if (!requestId || !processId || !countryCode || !processRoleId) return;
   if (status !== STATUS.DRAFT) return;
   if (frontCode !== 'MTO') return;
@@ -227,6 +321,9 @@ async function beforeUpdateRequest(req) {
   if (!editor) {
     req.reject(403, `User cannot edit request in status ${currentStatus}`);
   }
+
+  req._requestBefore = current;
+  req._requestAuditRoleCode = editor.ROLE_CODE;
 
   const incomingStatus = req.data.STATUS === undefined ? undefined : normalizeStatus(req.data.STATUS);
   let isSubmitTransition = false;
@@ -264,13 +361,39 @@ async function beforeUpdateRequest(req) {
 }
 
 async function afterUpdateRequest(_, req) {
+  const tx = cds.tx(req);
+  const userId = currentUserId(req);
+  const requestId = getEntityId(req);
+  const before = req._requestBefore;
+  const roleCode = req._requestAuditRoleCode || null;
+
+  if (requestId && before) {
+    const candidates = ['PROCESS_ID', 'FRONT_CODE', 'MASTER_OBJECT_ID', 'COUNTRY_CODE', 'SUBJECT_TYPE', 'SUBJECT_ID', 'SUBJECT_NAME', 'STATUS', 'ISDELETED'];
+    for (const key of candidates) {
+      if (req.data?.[key] === undefined) continue;
+      const oldValue = before[key];
+      const newValue = req.data[key];
+      if (areValuesEqual(oldValue, newValue)) continue;
+      await insertRequestFieldChangeLog(tx, {
+        requestId,
+        fieldId: SYSTEM_FIELD_ID,
+        fieldCode: `MDG_REQUEST_HEADER.${key}`,
+        oldValue,
+        newValue,
+        changeType: 'UPDATE',
+        changedBy: userId,
+        changedRole: roleCode,
+        source: 'REQUEST_UPDATE'
+      });
+    }
+  }
+
   if (!req._submitTransition) return;
 
-  const tx = cds.tx(req);
-  const { requestId, processId, actorUser, actorRole } = req._submitTransition;
+  const { requestId: submitRequestId, processId, actorUser, actorRole } = req._submitTransition;
 
   await insertActionLog(tx, {
-    requestId,
+    requestId: submitRequestId,
     action: 'SUBMIT',
     actorUser,
     actorRole,
@@ -278,7 +401,7 @@ async function afterUpdateRequest(_, req) {
   });
 
   await upsertApprovalTaskOnSubmit(tx, {
-    requestId,
+    requestId: submitRequestId,
     processId,
     actorUser
   });
@@ -305,6 +428,7 @@ async function onDeleteRequest(req) {
     req.reject(403, `User cannot delete request in status ${current.STATUS}`);
   }
 
+  const ts = now();
   await tx.run(
     `UPDATE "MDG_REQUEST_HEADER"
         SET "ISDELETED" = true,
@@ -313,8 +437,20 @@ async function onDeleteRequest(req) {
             "MODIFIEDAT" = ?,
             "MODIFIEDBY" = ?
       WHERE "ID" = ?`,
-    [now(), userId, now(), userId, requestId]
+    [ts, userId, ts, userId, requestId]
   );
+
+  await insertRequestFieldChangeLog(tx, {
+    requestId,
+    fieldId: SYSTEM_FIELD_ID,
+    fieldCode: 'MDG_REQUEST_HEADER.ISDELETED',
+    oldValue: false,
+    newValue: true,
+    changeType: 'DELETE',
+    changedBy: userId,
+    changedRole: editor.ROLE_CODE,
+    source: 'REQUEST_DELETE'
+  });
 }
 
 async function beforeUpsertRequestValue(req) {
@@ -331,12 +467,20 @@ async function beforeUpsertRequestValue(req) {
 
     const currentValue = await getRequestValueById(tx, valueId);
     if (!currentValue) req.reject(404, `RequestValue not found: ${valueId}`);
+    const currentDetail = await getRequestValueDetailById(tx, valueId);
 
     requestId = requestId || currentValue.REQUEST_ID;
     fieldId = fieldId || currentValue.FIELD_ID;
 
     req.data.REQUEST_ID = requestId;
     req.data.FIELD_ID = fieldId;
+    req._requestValueAudit = {
+      requestId,
+      fieldId,
+      lineNo: currentDetail?.LINE_NO ?? req.data?.LINE_NO ?? 1,
+      oldValue: currentDetail?.VALUE ?? null,
+      changeType: 'UPDATE'
+    };
   }
 
   if (!requestId || !fieldId) {
@@ -368,12 +512,107 @@ async function beforeUpsertRequestValue(req) {
     req.reject(403, `Field is not writable for role ${editor.ROLE_CODE} (fieldControl=${fieldControl})`);
   }
 
+  const fieldCode = await getFieldCodeById(tx, fieldId);
+  const lineNo = req.data?.LINE_NO ?? req._requestValueAudit?.lineNo ?? 1;
+  req._requestValueAudit = {
+    ...(req._requestValueAudit || {}),
+    requestId,
+    fieldId,
+    fieldCode: fieldCode || null,
+    lineNo,
+    roleCode: editor.ROLE_CODE,
+    changeType: event === 'CREATE' ? 'CREATE' : (req._requestValueAudit?.changeType || 'UPDATE')
+  };
+
   req.data.MODIFIEDAT = now();
   req.data.MODIFIEDBY = userId;
 
   if (event === 'CREATE') {
     req.data.ID = req.data.ID || uuid();
   }
+
+  if (req.data.VALUE !== undefined && req.data.VALUE !== null && String(req.data.VALUE).trim() !== '') {
+    await syncRequestSubjectFromRequestValue(tx, {
+      requestId,
+      fieldId,
+      rawValue: req.data.VALUE,
+      userId
+    });
+  }
+}
+
+async function afterUpsertRequestValue(_, req) {
+  const tx = cds.tx(req);
+  const userId = currentUserId(req);
+  const audit = req._requestValueAudit;
+  if (!audit?.requestId || !audit?.fieldId) return;
+
+  if (req.event === 'UPDATE' && req.data?.VALUE === undefined) return;
+
+  const newValue = req.data?.VALUE ?? null;
+  const oldValue = audit.oldValue ?? null;
+  const changeType = audit.changeType || (req.event === 'CREATE' ? 'CREATE' : 'UPDATE');
+  if (changeType === 'UPDATE' && areValuesEqual(oldValue, newValue)) return;
+
+  await insertRequestFieldChangeLog(tx, {
+    requestId: audit.requestId,
+    fieldId: audit.fieldId,
+    fieldCode: audit.fieldCode || `FIELD_ID:${audit.fieldId}`,
+    lineNo: audit.lineNo || 1,
+    oldValue,
+    newValue,
+    changeType,
+    changedBy: userId,
+    changedRole: audit.roleCode || null,
+    source: req.event === 'CREATE' ? 'REQUEST_VALUE_CREATE' : 'REQUEST_VALUE_UPDATE'
+  });
+}
+
+async function onDeleteRequestValue(req) {
+  const tx = cds.tx(req);
+  const userId = currentUserId(req);
+  const valueId = getEntityId(req);
+  if (!valueId) req.reject(400, 'Missing RequestValue ID');
+
+  const currentValue = await getRequestValueDetailById(tx, valueId);
+  if (!currentValue) req.reject(404, `RequestValue not found: ${valueId}`);
+
+  const request = await getRequestById(tx, currentValue.REQUEST_ID);
+  if (!request) req.reject(404, `Request not found: ${currentValue.REQUEST_ID}`);
+  if (request.ISDELETED) req.reject(409, 'Request is deleted');
+
+  const status = normalizeStatus(request.STATUS);
+  const assignments = await getUserRoleAssignments(tx, req, {
+    processId: request.PROCESS_ID,
+    countryCode: request.COUNTRY_CODE
+  });
+  const editor = resolveEditorRoleFromStatus(assignments, status);
+  if (!editor) req.reject(403, `User cannot edit RequestValues for status ${status}`);
+
+  const fieldControl = await getEffectiveFieldControl(tx, {
+    processRoleId: editor.PROCESS_ROLE_ID,
+    countryCode: request.COUNTRY_CODE,
+    fieldId: currentValue.FIELD_ID
+  });
+  if ([FIELD_CONTROL.READ_ONLY, FIELD_CONTROL.HIDDEN].includes(fieldControl)) {
+    req.reject(403, `Field is not writable for role ${editor.ROLE_CODE} (fieldControl=${fieldControl})`);
+  }
+
+  await tx.run(`DELETE FROM "MDG_REQUEST_FIELD_VALUE" WHERE "ID" = ?`, [valueId]);
+
+  const fieldCode = await getFieldCodeById(tx, currentValue.FIELD_ID);
+  await insertRequestFieldChangeLog(tx, {
+    requestId: currentValue.REQUEST_ID,
+    fieldId: currentValue.FIELD_ID,
+    fieldCode: fieldCode || `FIELD_ID:${currentValue.FIELD_ID}`,
+    lineNo: currentValue.LINE_NO || 1,
+    oldValue: currentValue.VALUE,
+    newValue: null,
+    changeType: 'DELETE',
+    changedBy: userId,
+    changedRole: editor.ROLE_CODE,
+    source: 'REQUEST_VALUE_DELETE'
+  });
 }
 
 function register(service) {
@@ -385,6 +624,9 @@ function register(service) {
 
   service.before('CREATE', 'RequestValues', beforeUpsertRequestValue);
   service.before('UPDATE', 'RequestValues', beforeUpsertRequestValue);
+  service.after('CREATE', 'RequestValues', afterUpsertRequestValue);
+  service.after('UPDATE', 'RequestValues', afterUpsertRequestValue);
+  service.on('DELETE', 'RequestValues', onDeleteRequestValue);
 }
 
 module.exports = { register };

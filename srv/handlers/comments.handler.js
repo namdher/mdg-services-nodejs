@@ -9,6 +9,7 @@ const {
   now,
   uuid
 } = require('./_lib/mdg-workflow.util');
+const { SYSTEM_FIELD_ID, insertRequestFieldChangeLog } = require('./_lib/request-change-log.util');
 
 async function beforeCreateRequestComment(req) {
   const tx = cds.tx(req);
@@ -44,10 +45,35 @@ async function beforeCreateRequestComment(req) {
   req.data.CREATEDBY = userId;
   req.data.AUTHOR_USER = userId;
   req.data.AUTHOR_ROLE = roleToBusinessName(chosen.ROLE_CODE);
+  req._commentAudit = {
+    requestId,
+    message,
+    roleCode: chosen.ROLE_CODE,
+    userId
+  };
+}
+
+async function afterCreateRequestComment(_, req) {
+  const tx = cds.tx(req);
+  const audit = req._commentAudit;
+  if (!audit?.requestId) return;
+
+  await insertRequestFieldChangeLog(tx, {
+    requestId: audit.requestId,
+    fieldId: SYSTEM_FIELD_ID,
+    fieldCode: 'MDG_REQUEST_COMMENT.MESSAGE',
+    oldValue: null,
+    newValue: audit.message,
+    changeType: 'CREATE',
+    changedBy: audit.userId,
+    changedRole: audit.roleCode,
+    source: 'REQUEST_COMMENT_CREATE'
+  });
 }
 
 function register(service) {
   service.before('CREATE', 'RequestComments', beforeCreateRequestComment);
+  service.after('CREATE', 'RequestComments', afterCreateRequestComment);
 }
 
 module.exports = { register };

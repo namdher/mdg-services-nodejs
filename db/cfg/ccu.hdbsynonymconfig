@@ -113,6 +113,12 @@
       "object": "MDG_REQUEST_ACTION_LOG"
     }
   },
+  "MDG_REQUEST_FIELD_CHANGE_LOG": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_REQUEST_FIELD_CHANGE_LOG"
+    }
+  },
   "MDG_REQUEST_SAP_MESSAGE": {
     "target": {
       "schema": "CCU",

@@ -200,6 +200,21 @@
   CREATEDBY : String(255) @cds.on.insert: $user;
 }
 
+@cds.persistence.exists entity MDG_REQUEST_FIELD_CHANGE_LOG {
+  key ID : UUID;
+  REQUEST_ID : UUID;
+  FIELD_ID : UUID;
+  FIELD_CODE : String(80);
+  LINE_NO : Integer;
+  OLD_VALUE : LargeString;
+  NEW_VALUE : LargeString;
+  CHANGE_TYPE : String(20);
+  CHANGED_AT : Timestamp;
+  CHANGED_BY : String(255);
+  CHANGED_ROLE : String(30);
+  SOURCE : String(30);
+}
+
 @cds.persistence.exists entity MDG_REQUEST_SAP_MESSAGE {
   key ID : UUID;
   REQUEST_ID : UUID;                   // <- FK UUID
