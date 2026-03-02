@@ -28,7 +28,6 @@ const PROCESS_TO_ENTITYSET = Object.freeze({
   CUSTOMER_NIF: 'ClientesNIFSet'
 });
 const STATUS_COMPLETED = STATUS.APPROVED;
-const CSRF_CACHE = new Map();
 
 function _normalizePropertyName(value) {
   return String(value || '')
@@ -46,28 +45,6 @@ function _stringifySafe(value) {
   }
 }
 
-function _extractHeaderValue(headers, key) {
-  if (!headers || typeof headers !== 'object') return null;
-  const target = String(key).toLowerCase();
-  for (const [k, v] of Object.entries(headers)) {
-    if (String(k).toLowerCase() !== target) continue;
-    // Keep all Set-Cookie entries; CSRF validation may require full cookie context.
-    if (Array.isArray(v) && target === 'set-cookie') return v;
-    if (Array.isArray(v)) return v[0] || null;
-    return v ?? null;
-  }
-  return null;
-}
-
-function _buildCookieHeader(setCookieHeader) {
-  if (!setCookieHeader) return null;
-  const raw = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
-  const pairs = raw
-    .map((c) => String(c || '').split(';')[0].trim())
-    .filter(Boolean);
-  return pairs.length ? pairs.join('; ') : null;
-}
-
 function _responseBodyToText(body) {
   if (body === undefined || body === null) return '';
   if (typeof body === 'string') return body;
@@ -79,50 +56,23 @@ function _responseBodyToText(body) {
   }
 }
 
-function _isCsrfFailure(err) {
-  const status = Number(err?.response?.status || err?.statusCode || 0);
-  if (status !== 403) return false;
-  const bodyText = _responseBodyToText(err?.response?.data).toLowerCase();
-  const msgText = String(err?.message || '').toLowerCase();
-  const text = `${bodyText} ${msgText}`;
-  return text.includes('csrf') || text.includes('token');
-}
-
-async function _fetchCsrfContext({ forceRefresh = false, fetchUrl } = {}) {
-  const key = `${S4_DESTINATION_NAME}::${fetchUrl || '$metadata'}`;
-  if (!forceRefresh && CSRF_CACHE.has(key)) {
-    return CSRF_CACHE.get(key);
-  }
-
-  const metadataUrl = fetchUrl || `${S4_SERVICE_PATH.replace(/\/+$/, '')}/`;
-  const res = await executeHttpRequest(
-    { destinationName: S4_DESTINATION_NAME },
-    {
-      method: 'GET',
-      url: metadataUrl,
-      headers: {
-        'X-CSRF-Token': 'Fetch',
-        Accept: 'application/json, application/xml, text/xml, application/atom+xml, */*'
-      }
-    }
-  );
-
-  const headers = res?.headers || {};
-  const csrfContext = {
-    token: _extractHeaderValue(headers, 'x-csrf-token') || null,
-    cookie: _buildCookieHeader(_extractHeaderValue(headers, 'set-cookie')) || null
-  };
-  CSRF_CACHE.set(key, csrfContext);
-  return csrfContext;
-}
-
 function _extractCorrelationId(responseHeaders, errorHeaders) {
-  return _extractHeaderValue(responseHeaders, 'x-correlation-id')
-    || _extractHeaderValue(responseHeaders, 'sap-correlationid')
-    || _extractHeaderValue(responseHeaders, 'sap-request-id')
-    || _extractHeaderValue(errorHeaders, 'x-correlation-id')
-    || _extractHeaderValue(errorHeaders, 'sap-correlationid')
-    || _extractHeaderValue(errorHeaders, 'sap-request-id')
+  const pick = (headers, key) => {
+    if (!headers || typeof headers !== 'object') return null;
+    const target = String(key).toLowerCase();
+    for (const [k, v] of Object.entries(headers)) {
+      if (String(k).toLowerCase() !== target) continue;
+      if (Array.isArray(v)) return v[0] || null;
+      return v ?? null;
+    }
+    return null;
+  };
+  return pick(responseHeaders, 'x-correlation-id')
+    || pick(responseHeaders, 'sap-correlationid')
+    || pick(responseHeaders, 'sap-request-id')
+    || pick(errorHeaders, 'x-correlation-id')
+    || pick(errorHeaders, 'sap-correlationid')
+    || pick(errorHeaders, 'sap-request-id')
     || null;
 }
 
@@ -341,7 +291,6 @@ async function _postToS4AndPersist(tx, {
   }
 
   const url = `${S4_SERVICE_PATH.replace(/\/+$/, '')}/${entitySet}`;
-  const csrfFetchUrl = `${S4_SERVICE_PATH.replace(/\/+$/, '')}/`;
   let sapTargetId = await _resolveSapTargetId(tx, { processId, entitySet });
   if (!sapTargetId) {
     // Fallback mode: routing is code-driven (process -> entityset),
@@ -361,55 +310,28 @@ async function _postToS4AndPersist(tx, {
   let errorHeaders = null;
 
   try {
-    let csrf = await _fetchCsrfContext({ fetchUrl: csrfFetchUrl });
     const res = await executeHttpRequest(
       { destinationName: S4_DESTINATION_NAME },
       {
-        method: 'POST',
-        url,
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          ...(csrf?.token ? { 'X-CSRF-Token': csrf.token } : {}),
-          ...(csrf?.cookie ? { Cookie: csrf.cookie } : {})
-        },
-        data: payload
+      method: 'POST',
+      url,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      data: payload
+      },
+      {
+        fetchCsrfToken: true
       }
     );
     status = Number(res?.status || 200);
     responseBody = res?.data ?? null;
     responseHeaders = res?.headers ?? null;
   } catch (err) {
-    if (_isCsrfFailure(err)) {
-      try {
-        const csrf = await _fetchCsrfContext({ forceRefresh: true, fetchUrl: csrfFetchUrl });
-        const retryRes = await executeHttpRequest(
-          { destinationName: S4_DESTINATION_NAME },
-          {
-            method: 'POST',
-            url,
-            headers: {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-              ...(csrf?.token ? { 'X-CSRF-Token': csrf.token } : {}),
-              ...(csrf?.cookie ? { Cookie: csrf.cookie } : {})
-            },
-            data: payload
-          }
-        );
-        status = Number(retryRes?.status || 200);
-        responseBody = retryRes?.data ?? null;
-        responseHeaders = retryRes?.headers ?? null;
-      } catch (retryErr) {
-        status = Number(retryErr?.response?.status || retryErr?.statusCode || 500);
-        responseBody = retryErr?.response?.data ?? { error: retryErr?.message || 'S/4 POST failed' };
-        errorHeaders = retryErr?.response?.headers ?? null;
-      }
-    } else {
-      status = Number(err?.response?.status || err?.statusCode || 500);
-      responseBody = err?.response?.data ?? { error: err?.message || 'S/4 POST failed' };
-      errorHeaders = err?.response?.headers ?? null;
-    }
+    status = Number(err?.response?.status || err?.statusCode || 500);
+    responseBody = err?.response?.data ?? err?.data ?? { error: err?.message || 'S/4 POST failed' };
+    errorHeaders = err?.response?.headers ?? err?.headers ?? null;
   }
 
   const correlationId = _extractCorrelationId(responseHeaders, errorHeaders);

@@ -134,10 +134,15 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
        JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
          ON fcb."FIELD_ID" = fc."ID"
         AND fcb."PROCESS_ROLE_ID" = ?
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = fcb."PROCESS_ROLE_ID"
+        AND fcc."FIELD_ID" = fcb."FIELD_ID"
+        AND fcc."COUNTRY_CODE" = ?
       WHERE pb."PROCESS_ID" = ?
         AND fcb."DEFAULT_BASE" IS NOT NULL
-        AND LENGTH(TRIM(fcb."DEFAULT_BASE")) > 0`,
-    [processRoleId, processId]
+        AND LENGTH(TRIM(fcb."DEFAULT_BASE")) > 0
+        AND COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) = ${FIELD_CONTROL.READ_ONLY}`,
+    [processRoleId, countryCode, processId]
   );
 
   if (!scopedDefaults.length) {
@@ -273,11 +278,7 @@ async function afterCreateRequest(_, req) {
   const requestId = req.data?.ID;
   const processId = req.data?.PROCESS_ID;
   const countryCode = req.data?.COUNTRY_CODE;
-  const frontCode = typeof req.data?.FRONT_CODE === 'string' ? req.data.FRONT_CODE.trim().toUpperCase() : '';
   const status = normalizeStatus(req.data?.STATUS);
-  const processCode = typeof req._defaultsContext?.processCode === 'string'
-    ? req._defaultsContext.processCode.trim().toUpperCase()
-    : '';
   const processRoleId = req._defaultsContext?.processRoleId || null;
 
   await insertRequestFieldChangeLog(tx, {
@@ -294,8 +295,6 @@ async function afterCreateRequest(_, req) {
 
   if (!requestId || !processId || !countryCode || !processRoleId) return;
   if (status !== STATUS.DRAFT) return;
-  if (frontCode !== 'MTO') return;
-  if (processCode !== 'CUSTOMER_CREATION') return;
 
   await applyDefaultsToRequest(tx, requestId, processId, countryCode, processRoleId, userId);
 }
@@ -333,6 +332,16 @@ async function beforeUpdateRequest(req) {
     if (!isValidSubmit) {
       req.reject(400, `Invalid status transition: ${currentStatus} -> ${incomingStatus}`);
     }
+
+    // Ensure read-only defaults are materialized before mandatory validation/submit.
+    await applyDefaultsToRequest(
+      tx,
+      requestId,
+      current.PROCESS_ID,
+      current.COUNTRY_CODE,
+      editor.PROCESS_ROLE_ID,
+      userId
+    );
 
     await validateMandatoryFieldsOnSubmit(tx, {
       requestId,

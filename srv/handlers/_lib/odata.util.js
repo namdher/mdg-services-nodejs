@@ -67,7 +67,7 @@ function _dequote(value) {
 }
 
 function _evalAtom(row, atom) {
-  const expr = String(atom || '').trim().replace(/^\(+|\)+$/g, '');
+  const expr = String(atom || '').trim();
   if (!expr) return true;
 
   // substringof('abc',Field)
@@ -86,6 +86,15 @@ function _evalAtom(row, atom) {
     const needle = _dequote(`'${contains[2]}'`).toLowerCase();
     const hay = String(row?.[field] ?? '').toLowerCase();
     return hay.includes(needle);
+  }
+
+  // startswith(Field,'abc')
+  const startsWith = expr.match(/^startswith\(\s*([A-Za-z0-9_]+)\s*,\s*'((?:''|[^'])*)'\s*\)$/i);
+  if (startsWith) {
+    const field = startsWith[1];
+    const needle = _dequote(`'${startsWith[2]}'`).toLowerCase();
+    const hay = String(row?.[field] ?? '').toLowerCase();
+    return hay.startsWith(needle);
   }
 
   // Field eq 'value'  or Field eq 123

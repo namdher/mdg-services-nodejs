@@ -36,12 +36,46 @@ function _toNumber(raw) {
   return { ok: true, value: n };
 }
 
-function _toIsoDate(raw) {
+function _toODataV2DateTime(raw) {
   const text = String(raw ?? '').trim();
   if (!text) return { ok: false, reason: 'empty_datetime' };
-  const d = new Date(text);
-  if (Number.isNaN(d.getTime())) return { ok: false, reason: `invalid_datetime:${text}` };
-  return { ok: true, value: d.toISOString() };
+
+  // Already in OData V2 JSON Date format
+  if (/^\/Date\((-?\d+)\)\/$/.test(text)) {
+    return { ok: true, value: text };
+  }
+
+  // Strict YYYY-MM-DD -> UTC midnight
+  const ymd = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) {
+    const y = Number(ymd[1]);
+    const m = Number(ymd[2]);
+    const d = Number(ymd[3]);
+    const ms = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+    const dt = new Date(ms);
+    if (Number.isNaN(dt.getTime())) return { ok: false, reason: `invalid_datetime:${text}` };
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== m || dt.getUTCDate() !== d) {
+      return { ok: false, reason: `invalid_datetime:${text}` };
+    }
+    return { ok: true, value: `/Date(${ms})/` };
+  }
+
+  // Reject plain numeric values to avoid accidental year conversion (e.g. "45847" -> +045847-...)
+  if (/^-?\d+$/.test(text)) {
+    return { ok: false, reason: `invalid_datetime_numeric:${text}` };
+  }
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return { ok: false, reason: `invalid_datetime:${text}` };
+  return { ok: true, value: `/Date(${parsed.getTime()})/` };
+}
+
+function _toIsoDateTimeOffset(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { ok: false, reason: 'empty_datetimeoffset' };
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return { ok: false, reason: `invalid_datetimeoffset:${text}` };
+  return { ok: true, value: parsed.toISOString() };
 }
 
 function convertValueForSap(raw, { edmType, fallbackDataType } = {}) {
@@ -59,8 +93,9 @@ function convertValueForSap(raw, { edmType, fallbackDataType } = {}) {
     case 'Edm.Single':
       return _toNumber(raw);
     case 'Edm.DateTime':
+      return _toODataV2DateTime(raw);
     case 'Edm.DateTimeOffset':
-      return _toIsoDate(raw);
+      return _toIsoDateTimeOffset(raw);
     case 'Edm.String':
     default: {
       const text = String(raw ?? '');
@@ -71,4 +106,3 @@ function convertValueForSap(raw, { edmType, fallbackDataType } = {}) {
 }
 
 module.exports = { convertValueForSap };
-

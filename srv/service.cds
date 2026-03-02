@@ -101,15 +101,34 @@ service MDGService @(path:'/mdg') {
     key ID    : String(200);
     Kunnr     : String(10);
     Vkorg     : String(4);
+    VkorgText : String(80);
     Vtweg     : String(2);
+    VtwegText : String(80);
     Spart     : String(2);
+    SpartText : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerVtweg {
+    key ID      : String(200);
+    Vkorg       : String(4);
+    VkorgText   : String(80);
+    Vtweg       : String(2);
+    VtwegText   : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerSpart {
+    key ID      : String(200);
+    Spart       : String(2);
+    SpartText   : String(80);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerSoc {
     key ID    : String(200);
     Kunnr     : String(10);
     Bukrs     : String(4);
+    BukrsText : String(80);
     Maber     : String(2);
+    MaberText : String(80);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerCom {
