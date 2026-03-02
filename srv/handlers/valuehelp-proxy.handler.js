@@ -1,3 +1,5 @@
+const cds = require('@sap/cds');
+const { SELECT } = cds;
 const { s4Get } = require('./_lib/s4.client');
 const { getQueryOptions, pickODataOptions, applyLocalFilter, applyLocalPaging } = require('./_lib/odata.util');
 
@@ -25,12 +27,14 @@ const VH_MAP = {
     servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
     entitySet: 'I_BusinessPartner',
     keyField: 'Kunnr',
+    fieldCode: 'KNA1.KUNNR',
+    filterMode: 'local',
     searchFields: ['Kunnr', 'Name1']
   },
   VH_CustomerClassification: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS', entitySet: 'I_CustomerClassification', keyField: 'CustomerClassification', searchFields: ['CustomerClassification', 'CustomerClassification_Text'], filterMode: 'local' },
-  VH_CustomerOrgV: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_SalesOrganization', syntheticKey: true, keyParts: ['Vkorg'] },
-  VH_CustomerVtweg: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_DistributionChainCountry', syntheticKey: true, keyParts: ['Vkorg', 'Vtweg'] },
-  VH_CustomerSpart: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_Division', syntheticKey: true, keyParts: ['Spart'] },
+  VH_CustomerOrgV: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_SalesOrganization', syntheticKey: true, keyParts: ['Vkorg'], fieldCode: 'KNVV.VKORG' },
+  VH_CustomerVtweg: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_DistributionChainCountry', syntheticKey: true, keyParts: ['Vkorg', 'Vtweg'], fieldCode: 'KNVV.VTWEG' },
+  VH_CustomerSpart: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_Division', syntheticKey: true, keyParts: ['Spart'], fieldCode: 'KNVV.SPART' },
   VH_CustomerSoc:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_SOC_CDS',  entitySet: 'I_CompanyCode', syntheticKey: true, keyParts: ['Bukrs', 'Maber'] },
   VH_CustomerCom:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',  entitySet: 'ZCDS_CLIENTES_COM', syntheticKey: true, keyParts: ['Kunnr', 'Parnr'] },
   VH_CustomerEmp:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_EMP_CDS',  entitySet: 'zcds_clientes_emp', syntheticKey: true, keyParts: ['Kunnr', 'Bukrs', 'Ekorg', 'Vkorg'] },
@@ -95,12 +99,198 @@ function mapCustomerGenRows(rows) {
   }).filter((row) => row.Kunnr);
 }
 
+function _translateCustomerGenFilterToRemote(filterExpr) {
+  const src = String(filterExpr || '').trim();
+  if (!src) return '';
+  return src
+    .replace(/\bKunnr\b/g, 'BusinessPartner')
+    .replace(/\bPartner\b/g, 'BusinessPartner')
+    .replace(/\bName1\b/g, 'BusinessPartnerName');
+}
+
+function _translateCustomerGenSelectToRemote(selectExpr) {
+  const parts = String(selectExpr || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (!parts.length) return undefined;
+
+  const mapped = parts.map((p) => {
+    if (p === 'Kunnr' || p === 'Partner') return 'BusinessPartner';
+    if (p === 'Name1') return 'BusinessPartnerName';
+    return p;
+  });
+  return Array.from(new Set(mapped)).join(',');
+}
+
+async function _fetchCustomerGenLocalWindow({ cfg, baseRemoteQuery, localFilter, localSearch, localTop, localSkip }) {
+  const target = Math.max(Number(localSkip || 0), 0) + Math.max(Number(localTop || 0), 0);
+  const batchSize = 500;
+  const maxScan = 50000;
+  let scanned = 0;
+  let offset = 0;
+  let aggregated = [];
+
+  while (aggregated.length < target && scanned < maxScan) {
+    const q = { ...baseRemoteQuery, $top: batchSize, $skip: offset };
+    const remoteRows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: q });
+    if (!remoteRows.length) break;
+
+    let rows = mapCustomerGenRows(remoteRows);
+    if (localFilter) rows = applyLocalFilter(rows, localFilter);
+    if (localSearch) rows = applyLocalSearch(rows, localSearch, cfg.searchFields || ['Kunnr', 'Name1']);
+    aggregated = aggregated.concat(rows);
+
+    scanned += remoteRows.length;
+    offset += remoteRows.length;
+    if (remoteRows.length < batchSize) break;
+  }
+
+  if (scanned >= maxScan) {
+    console.warn(`[VH_CustomerGen] local fallback reached scan cap ${maxScan}`);
+  }
+  return applyLocalPaging(aggregated, localTop, localSkip);
+}
+
 function _extractEqValue(filterExpr, fieldName) {
   const f = String(filterExpr || '');
   const re = new RegExp(`${fieldName}\\s+eq\\s+'((?:''|[^'])*)'`, 'i');
   const m = f.match(re);
   if (!m) return null;
   return String(m[1]).replace(/''/g, "'");
+}
+
+function _escapeODataLiteral(value) {
+  return String(value ?? '').replace(/'/g, "''");
+}
+
+function _getContextInput(req, q) {
+  const payloadContext = req?.data?.context;
+  const queryContext = q?.context;
+  const raw = payloadContext ?? queryContext;
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(String(raw));
+  } catch (_) {
+    return {};
+  }
+}
+
+function _getRequestIdInput(req, q) {
+  return String(
+    req?.data?.requestId ??
+    req?.data?.REQUEST_ID ??
+    q?.requestId ??
+    q?.REQUEST_ID ??
+    ''
+  ).trim();
+}
+
+async function _getVhFieldCodes(tx, vhName) {
+  if (!vhName) return [];
+  const rows = await tx.run(
+    SELECT.from('MDG_FIELD_CATALOG')
+      .columns('FIELD_CODE')
+      .where({ VH_SERVICE: 'CAP', VH_ENTITYSET: vhName })
+  );
+  return (rows || [])
+    .map((row) => String(row.FIELD_CODE || '').trim())
+    .filter(Boolean);
+}
+
+async function _loadVhDependencies(tx, fieldCode) {
+  if (!fieldCode) return [];
+  try {
+    return await tx.run(
+      SELECT.from('MDG_FIELD_VH_DEPENDENCY')
+        .columns('FIELD_CODE', 'DEPENDS_ON_FIELD_CODE', 'VH_PROPERTY_NAME', 'REQUIRED', 'EVALUATION_ORDER', 'IS_ACTIVE')
+        .where({ FIELD_CODE: fieldCode, IS_ACTIVE: true })
+        .orderBy('EVALUATION_ORDER asc')
+    );
+  } catch (_) {
+    // Backward compatible path if dependency table not present in a landscape.
+    return [];
+  }
+}
+
+async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
+  if (!requestId || !fieldCode) return null;
+  const rows = await tx.run(
+    SELECT.from('MDG_REQUEST_FIELD_VALUE as rv')
+      .columns('rv.VALUE as VALUE')
+      .join('MDG_FIELD_CATALOG as fc')
+      .on('fc.ID = rv.FIELD_ID')
+      .where({ 'rv.REQUEST_ID': requestId, 'fc.FIELD_CODE': fieldCode })
+      .orderBy('rv.LINE_NO asc')
+      .limit(1)
+  );
+  const value = rows?.[0]?.VALUE;
+  return value === undefined || value === null ? null : String(value).trim();
+}
+
+async function _resolveDependencyValue(tx, req, q, dep, contextMap, requestId) {
+  const depFieldCode = String(dep?.DEPENDS_ON_FIELD_CODE || '').trim();
+  if (!depFieldCode) return null;
+
+  const fromContext = contextMap?.[depFieldCode];
+  if (fromContext !== undefined && fromContext !== null && String(fromContext).trim() !== '') {
+    return String(fromContext).trim();
+  }
+
+  const depSimple = depFieldCode.split('.').pop();
+  const fromSimpleContext = contextMap?.[depSimple];
+  if (fromSimpleContext !== undefined && fromSimpleContext !== null && String(fromSimpleContext).trim() !== '') {
+    return String(fromSimpleContext).trim();
+  }
+
+  const fromRequest = await _readRequestValueByFieldCode(tx, requestId, depFieldCode);
+  if (fromRequest) return fromRequest;
+
+  const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
+  if (vhPropertyName) {
+    const fromQueryFilter = _extractEqValue(q?.$filter, vhPropertyName);
+    if (fromQueryFilter) return fromQueryFilter;
+  }
+
+  return null;
+}
+
+async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
+  const effectiveFieldCode = String(fieldCode || '').trim();
+  if (!effectiveFieldCode) return { missingRequired: false, dependencies: [] };
+
+  const deps = await _loadVhDependencies(tx, effectiveFieldCode);
+  if (!deps.length) return { missingRequired: false, dependencies: [] };
+
+  const contextMap = _getContextInput(req, q);
+  const requestId = _getRequestIdInput(req, q);
+  const depFilters = [];
+  const unresolvedRequired = [];
+
+  for (const dep of deps) {
+    const value = await _resolveDependencyValue(tx, req, q, dep, contextMap, requestId);
+    const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
+    const isRequired = dep?.REQUIRED === true || String(dep?.REQUIRED).toLowerCase() === 'true' || dep?.REQUIRED === 1;
+
+    if (!value) {
+      if (isRequired) unresolvedRequired.push(String(dep?.DEPENDS_ON_FIELD_CODE || '').trim() || vhPropertyName || '?');
+      continue;
+    }
+    if (!vhPropertyName) continue;
+
+    depFilters.push(`${vhPropertyName} eq '${_escapeODataLiteral(value)}'`);
+  }
+
+  if (depFilters.length) {
+    remoteQ.$filter = remoteQ.$filter ? `(${remoteQ.$filter}) and (${depFilters.join(' and ')})` : depFilters.join(' and ');
+  }
+
+  if (unresolvedRequired.length) {
+    console.warn(`[VH_DEP_MISSING] ${vhName} fieldCode=${effectiveFieldCode} missing=${unresolvedRequired.join(',')}`);
+    return { missingRequired: true, dependencies: deps };
+  }
+  return { missingRequired: false, dependencies: deps };
 }
 
 function mapCustomerOrgVRows(rows) {
@@ -169,6 +359,7 @@ function mapCustomerSocRows(rows, mode) {
 
 async function readCustomerOrgV(req) {
   const cfg = VH_MAP.VH_CustomerOrgV;
+  const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
   if (q.$top === undefined) q.$top = 50;
 
@@ -178,6 +369,8 @@ async function readCustomerOrgV(req) {
   const localSkip = q.$skip;
   const remoteQ = { ...q };
   delete remoteQ.$filter;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerOrgV', cfg.fieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
     delete remoteQ.$skip;
@@ -197,8 +390,9 @@ async function readCustomerOrgV(req) {
   return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
 }
 
-async function readCustomerVtweg(req) {
-  const cfg = VH_MAP.VH_CustomerVtweg;
+async function readCustomerGen(req) {
+  const cfg = VH_MAP.VH_CustomerGen;
+  const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
   if (q.$top === undefined) q.$top = 50;
 
@@ -207,11 +401,71 @@ async function readCustomerVtweg(req) {
   const localTop = q.$top;
   const localSkip = q.$skip;
   const remoteQ = { ...q };
-  const depVkorg = _extractEqValue(localFilter, 'Vkorg');
-  if (depVkorg) {
-    remoteQ.$filter = `ProductSalesOrg eq '${depVkorg.replace(/'/g, "''")}'`;
-  } else {
-    delete remoteQ.$filter;
+
+  // $search from UI is applied in CAP as local fallback for cross-backend compatibility.
+  delete remoteQ.$search;
+  delete remoteQ.search;
+  delete remoteQ.q;
+
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerGen', cfg.fieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
+
+  const depFilterOnly = remoteQ.$filter ? String(remoteQ.$filter) : '';
+  const translatedFilter = _translateCustomerGenFilterToRemote(localFilter);
+  if (localFilter) {
+    remoteQ.$filter = depFilterOnly
+      ? `(${depFilterOnly}) and (${translatedFilter})`
+      : translatedFilter;
+  }
+
+  const translatedSelect = _translateCustomerGenSelectToRemote(q.$select);
+  if (translatedSelect) remoteQ.$select = translatedSelect;
+
+  let rows;
+  try {
+    rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
+    rows = mapCustomerGenRows(rows);
+    if (localSearch) rows = applyLocalSearch(rows, localSearch, cfg.searchFields || ['Kunnr', 'Name1']);
+    return dedupeRows(rows, (row) => String(row?.[cfg.keyField] ?? '').trim() || null);
+  } catch (err) {
+    // If backend rejects translated expression/select, fallback to local filtering in paged blocks.
+    const fallbackBase = { ...remoteQ };
+    if (localFilter) fallbackBase.$filter = depFilterOnly || undefined;
+    delete fallbackBase.$select;
+    delete fallbackBase.$top;
+    delete fallbackBase.$skip;
+
+    const localWindow = await _fetchCustomerGenLocalWindow({
+      cfg,
+      baseRemoteQuery: fallbackBase,
+      localFilter,
+      localSearch,
+      localTop,
+      localSkip
+    });
+    return dedupeRows(localWindow, (row) => String(row?.[cfg.keyField] ?? '').trim() || null);
+  }
+}
+
+async function readCustomerVtweg(req) {
+  const cfg = VH_MAP.VH_CustomerVtweg;
+  const tx = cds.tx(req);
+  const q = pickODataOptions(getQueryOptions(req));
+  if (q.$top === undefined) q.$top = 50;
+
+  const localFilter = q.$filter;
+  const localSearch = q.$search ?? q.search ?? q.q;
+  const localTop = q.$top;
+  const localSkip = q.$skip;
+  const remoteQ = { ...q };
+  delete remoteQ.$filter;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerVtweg', cfg.fieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
+  if (!remoteQ.$filter) {
+    const depVkorg = _extractEqValue(localFilter, 'Vkorg');
+    if (depVkorg) {
+      remoteQ.$filter = `ProductSalesOrg eq '${_escapeODataLiteral(depVkorg)}'`;
+    }
   }
   if (localFilter || localSearch) {
     delete remoteQ.$top;
@@ -234,6 +488,7 @@ async function readCustomerVtweg(req) {
 
 async function readCustomerSpart(req) {
   const cfg = VH_MAP.VH_CustomerSpart;
+  const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
   if (q.$top === undefined) q.$top = 50;
 
@@ -243,6 +498,8 @@ async function readCustomerSpart(req) {
   const localSkip = q.$skip;
   const remoteQ = { ...q };
   delete remoteQ.$filter;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSpart', cfg.fieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
     delete remoteQ.$skip;
@@ -264,6 +521,7 @@ async function readCustomerSpart(req) {
 
 async function readCustomerSoc(req) {
   const cfg = VH_MAP.VH_CustomerSoc;
+  const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
   if (q.$top === undefined) q.$top = 50;
 
@@ -275,13 +533,17 @@ async function readCustomerSoc(req) {
   const remoteQ = { ...q };
 
   let entitySet = 'I_CompanyCode';
+  let depFieldCode = 'KNB1.BUKRS';
   let searchFields = ['Bukrs', 'BukrsText'];
   if (mode === 'DUNNING_AREA') {
     entitySet = 'I_DunningAreaStdVH';
+    depFieldCode = 'KNB1.MABER';
     searchFields = ['Maber', 'MaberText'];
   }
 
   delete remoteQ.$filter;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSoc', depFieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
     delete remoteQ.$skip;
@@ -338,6 +600,7 @@ function isFilterUnsupportedError(err) {
 async function readVH(req, vhName) {
   const cfg = VH_MAP[vhName];
   if (!cfg) req.reject(500, `VH mapping not found for ${vhName}`);
+  const tx = cds.tx(req);
 
   const q = pickODataOptions(getQueryOptions(req));
 
@@ -356,8 +619,19 @@ async function readVH(req, vhName) {
   );
   const remoteQ = { ...q };
   let forceLocalFilter = false;
+  let fieldCode = String(cfg.fieldCode || '').trim();
+  if (!fieldCode) {
+    const fieldCodes = await _getVhFieldCodes(tx, vhName);
+    if (fieldCodes.length === 1) fieldCode = fieldCodes[0];
+  }
 
   if (localFilter && filterMode === 'local') {
+    delete remoteQ.$filter;
+    forceLocalFilter = true;
+  }
+  if (localFilter && filterMode === 'auto' && enforceLocalFilter) {
+    // Avoid sending UI-local field names (e.g. Kunnr/Name1) to remote sets
+    // that expose different canonical properties (e.g. BusinessPartner).
     delete remoteQ.$filter;
     forceLocalFilter = true;
   }
@@ -372,6 +646,13 @@ async function readVH(req, vhName) {
     delete remoteQ.$top;
     delete remoteQ.$skip;
   }
+  if (vhName === 'VH_CustomerGen') {
+    // Local contract fields (Kunnr/Name1) are not S/4 canonical names in I_BusinessPartner.
+    delete remoteQ.$select;
+  }
+
+  const depState = await _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ);
+  if (depState.missingRequired) return [];
 
   let rows;
   try {
@@ -414,7 +695,7 @@ async function readVH(req, vhName) {
 }
 
 module.exports = {
-  readCustomerGen:  (req) => readVH(req, 'VH_CustomerGen'),
+  readCustomerGen,
   readCustomerClassification: (req) => readVH(req, 'VH_CustomerClassification'),
   readCustomerOrgV,
   readCustomerVtweg,

@@ -17,6 +17,12 @@
       "object": "MDG_FIELD_CATALOG"
     }
   },
+  "MDG_FIELD_VH_DEPENDENCY": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_FIELD_VH_DEPENDENCY"
+    }
+  },
   "MDG_BLOCK_FIELD": {
     "target": {
       "schema": "CCU",

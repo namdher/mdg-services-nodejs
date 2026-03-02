@@ -32,6 +32,16 @@
   VH_SEARCH_FIELDS : String(500);
 }
 
+@cds.persistence.exists entity MDG_FIELD_VH_DEPENDENCY {
+  key ID : UUID;
+  FIELD_CODE : String(80);
+  DEPENDS_ON_FIELD_CODE : String(80);
+  VH_PROPERTY_NAME : String(120);
+  REQUIRED : Boolean;
+  EVALUATION_ORDER : Integer;
+  IS_ACTIVE : Boolean;
+}
+
 @cds.persistence.exists entity MDG_BLOCK_FIELD {
   key ID : UUID;
   BLOCK_ID : UUID;                     // <- FK UUID
