@@ -24,6 +24,9 @@ service MDGService @(path:'/mdg') {
       as String(30)) as STATUS_TEXT,
       r.SUBJECT_ID,
       r.SUBJECT_NAME,
+      cast('' as String(1000)) as LAST_COMMENT,
+      cast('' as String(40)) as LAST_MANAGER_DECISION,
+      cast('' as String(255)) as LAST_MANAGER_USER,
       r.CREATEDAT,
       r.CREATEDBY,
       r.MODIFIEDAT,
@@ -51,8 +54,28 @@ service MDGService @(path:'/mdg') {
         end
       as String(200)) as FIELD_LABEL,
       l.LINE_NO,
-      l.OLD_VALUE,
-      l.NEW_VALUE,
+      cast(
+        case
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'DRAFT' then 'Borrador'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'IN_REVIEW' then 'En revisión'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'REWORK' then 'Devuelto'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'APPROVED' then 'Aprobado'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'SUBMITTED' then 'Enviado'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'ERROR' then 'Error'
+          else l.OLD_VALUE
+        end
+      as String(5000)) as OLD_VALUE,
+      cast(
+        case
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'DRAFT' then 'Borrador'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'IN_REVIEW' then 'En revisión'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'REWORK' then 'Devuelto'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'APPROVED' then 'Aprobado'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'SUBMITTED' then 'Enviado'
+          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'ERROR' then 'Error'
+          else l.NEW_VALUE
+        end
+      as String(5000)) as NEW_VALUE,
       l.CHANGE_TYPE,
       cast(
         case
@@ -414,9 +437,12 @@ annotate MDGService.Requests with {
 
 annotate MDGService.RequestsOverview with @UI.LineItem: [
   { $Type: 'UI.DataField', Value: PROCESS_NAME, Label: 'Proceso' },
-  { $Type: 'UI.DataField', Value: STATUS, Label: 'Estado' },
+  { $Type: 'UI.DataField', Value: STATUS_TEXT, Label: 'Estado' },
   { $Type: 'UI.DataField', Value: SUBJECT_ID, Label: 'ID Maestro' },
   { $Type: 'UI.DataField', Value: SUBJECT_NAME, Label: 'Nombre' },
+  { $Type: 'UI.DataField', Value: LAST_COMMENT, Label: 'Último comentario' },
+  { $Type: 'UI.DataField', Value: LAST_MANAGER_DECISION, Label: 'Última decisión' },
+  { $Type: 'UI.DataField', Value: LAST_MANAGER_USER, Label: 'Manager' },
   { $Type: 'UI.DataField', Value: CREATEDAT, Label: 'Creado' },
   { $Type: 'UI.DataField', Value: CREATEDBY, Label: 'Creado por' },
   { $Type: 'UI.DataField', Value: MODIFIEDAT, Label: 'Modificado' }
@@ -456,6 +482,9 @@ annotate MDGService.RequestsOverview with {
   STATUS_TEXT @Common.Label: 'Estado';
   SUBJECT_ID @Common.Label: 'ID Maestro';
   SUBJECT_NAME @Common.Label: 'Nombre';
+  LAST_COMMENT @Common.Label: 'Último comentario';
+  LAST_MANAGER_DECISION @Common.Label: 'Última decisión';
+  LAST_MANAGER_USER @Common.Label: 'Manager';
   CREATEDAT @Common.Label: 'Creado';
   CREATEDBY @Common.Label: 'Creado por';
   MODIFIEDAT @Common.Label: 'Modificado';

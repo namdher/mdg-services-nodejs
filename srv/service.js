@@ -9,6 +9,7 @@ module.exports = cds.service.impl(async function () {
   const prefill = require('./handlers/prefill.handler');
   const internalVh = require('./handlers/internal-vh.handler');
   const overviewVh = require('./handlers/overview-vh.handler');
+  const overviewEnrichment = require('./handlers/overview-enrichment.handler');
   const readAccess = require('./handlers/read-access.handler');
   const s4Metadata = require('./handlers/s4-metadata.handler');
   const requestCrud = require('./handlers/request-crud.handler');
@@ -57,6 +58,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_AllowedProcesses', overviewVh.readVhAllowedProcesses);
 
   this.before('READ', 'RequestsOverview', readAccess.beforeReadRequestsOverview);
+  this.after('READ', 'RequestsOverview', overviewEnrichment.afterReadRequestsOverview);
   this.before('READ', 'Requests', readAccess.beforeReadRequests);
   this.before('READ', 'RequestValues', readAccess.beforeReadRequestValues);
   this.before('READ', 'RequestComments', readAccess.beforeReadRequestComments);

@@ -17,17 +17,45 @@ const {
 } = require('./_lib/mdg-workflow.util');
 const { SYSTEM_FIELD_ID, areValuesEqual, insertRequestFieldChangeLog } = require('./_lib/request-change-log.util');
 
-const S4_DESTINATION_NAME = 'S4H-TECH';
-const S4_SERVICE_PATH = '/sap/opu/odata/sap/ZMDG_DM_SRV';
-const PROCESS_TO_ENTITYSET = Object.freeze({
-  CUSTOMER_CREATION: 'ClientesGeneralSet',
-  CUSTOMER_EXTEND_SALESAREA: 'ClientesOrgVentaSet',
-  CUSTOMER_EXTEND_COMPANYCODE: 'ClientesEmpresarialSet',
-  CUSTOMER_DATA_BANK: 'ClientesBancoSet',
-  CUSTOMER_TAX_OUTPUT: 'ClientesImpuestosSet',
-  CUSTOMER_NIF: 'ClientesNIFSet'
+const I18N = Object.freeze({
+  en: {
+    idRequired: 'ID is required',
+    requestNotFound: 'Request not found: {requestId}',
+    requestDeleted: 'Request is deleted',
+    actionOnlyInReview: 'Action {actionName} is only allowed when request is IN_REVIEW',
+    onlyManagerCanExecute: 'Only MANAGER (ROLE_CODE=APPROVER) can execute this action',
+    noSapTargetConfigured: 'No SAP target configured for process {processCode} in MDG_SAP_TARGET'
+  },
+  es: {
+    idRequired: 'ID es requerido',
+    requestNotFound: 'Solicitud no encontrada: {requestId}',
+    requestDeleted: 'La solicitud está eliminada',
+    actionOnlyInReview: 'La acción {actionName} solo está permitida cuando la solicitud está en IN_REVIEW',
+    onlyManagerCanExecute: 'Solo MANAGER (ROLE_CODE=APPROVER) puede ejecutar esta acción',
+    noSapTargetConfigured: 'No hay target SAP configurado para el proceso {processCode} en MDG_SAP_TARGET'
+  }
 });
 const STATUS_COMPLETED = STATUS.APPROVED;
+
+function _detectLocale(req) {
+  const raw = String(
+    req?.locale ||
+    req?.user?.locale ||
+    req?.headers?.['accept-language'] ||
+    req?._?.req?.headers?.['accept-language'] ||
+    ''
+  ).toLowerCase();
+  if (raw.startsWith('es')) return 'es';
+  return 'en';
+}
+
+function _t(req, key, params = {}) {
+  const locale = _detectLocale(req);
+  const bundle = I18N[locale] || I18N.en;
+  const fallback = I18N.en[key] || key;
+  const template = bundle[key] || fallback;
+  return template.replace(/\{(\w+)\}/g, (_, token) => String(params[token] ?? ''));
+}
 
 function _normalizePropertyName(value) {
   return String(value || '')
@@ -94,7 +122,7 @@ function _extractSapErrorMessage(body) {
   const message = body?.error?.message?.value || body?.error?.message || null;
   if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 200);
   const text = _responseBodyToText(body).trim();
-  return text ? text.slice(0, 200) : 'Error de integración SAP';
+  return text ? text.slice(0, 200) : 'SAP integration error';
 }
 
 function _buildSkippedFieldsComment(skippedFields) {
@@ -122,33 +150,25 @@ async function _resolveProcessForRequest(tx, requestId) {
   return rows?.[0] || null;
 }
 
-async function _resolveSapTargetId(tx, { processId, entitySet }) {
+async function _resolveSapTargetConfig(tx, { processId, operation = 'POST' }) {
   try {
     const rows = await tx.run(
-      `SELECT "ID"
+      `SELECT "ID", "DESTINATION_NAME", "SERVICE_PATH", "ENTITYSET", "OPERATION"
          FROM "MDG_SAP_TARGET"
         WHERE "PROCESS_ID" = ?
           AND "IS_ENABLED" = true
-          AND "DESTINATION_NAME" = ?
-          AND "SERVICE_PATH" = ?
-          AND "ENTITYSET" = ?
+          AND UPPER(COALESCE("OPERATION", 'POST')) = UPPER(?)
         ORDER BY "ID"`,
-      [processId, S4_DESTINATION_NAME, S4_SERVICE_PATH, entitySet]
+      [processId, operation]
     );
-    if (rows?.[0]?.ID) return rows[0].ID;
-
-    // Fallback: accept configuration variants on destination/service path
-    // while still scoping by process + entityset + enabled.
-    const fallbackRows = await tx.run(
-      `SELECT "ID"
-         FROM "MDG_SAP_TARGET"
-        WHERE "PROCESS_ID" = ?
-          AND "IS_ENABLED" = true
-          AND UPPER("ENTITYSET") = UPPER(?)
-        ORDER BY "ID"`,
-      [processId, entitySet]
-    );
-    return fallbackRows?.[0]?.ID || null;
+    if (!rows?.[0]) return null;
+    return {
+      id: rows[0].ID,
+      destinationName: rows[0].DESTINATION_NAME,
+      servicePath: rows[0].SERVICE_PATH,
+      entitySet: rows[0].ENTITYSET,
+      operation: rows[0].OPERATION
+    };
   } catch (err) {
     const msg = String(err?.message || '').toLowerCase();
     if (msg.includes('mdg_sap_target') && (msg.includes('invalid table') || msg.includes('not found') || msg.includes('does not exist'))) {
@@ -274,12 +294,17 @@ async function _postToS4AndPersist(tx, {
   requestId,
   processId,
   processCode,
-  entitySet,
+  sapTarget,
   payload,
   userId,
   previousStatus,
   skippedFields = []
 }) {
+  const destinationName = String(sapTarget?.destinationName || '').trim();
+  const servicePath = String(sapTarget?.servicePath || '').trim();
+  const entitySet = String(sapTarget?.entitySet || '').trim();
+  const sapTargetId = sapTarget?.id || null;
+
   if (Array.isArray(skippedFields) && skippedFields.length) {
     console.warn('[SAP_PAYLOAD_SKIPPED_FIELDS]', JSON.stringify({
       requestId,
@@ -290,20 +315,7 @@ async function _postToS4AndPersist(tx, {
     }));
   }
 
-  const url = `${S4_SERVICE_PATH.replace(/\/+$/, '')}/${entitySet}`;
-  let sapTargetId = await _resolveSapTargetId(tx, { processId, entitySet });
-  if (!sapTargetId) {
-    // Fallback mode: routing is code-driven (process -> entityset),
-    // keep persistence working even without MDG_SAP_TARGET configuration.
-    sapTargetId = processId;
-    console.warn('[SAP_TARGET_FALLBACK]', {
-      requestId,
-      processId,
-      processCode,
-      entitySet,
-      sapTargetId
-    });
-  }
+  const url = `${servicePath.replace(/\/+$/, '')}/${entitySet}`;
   let status = 500;
   let responseBody = null;
   let responseHeaders = null;
@@ -311,7 +323,7 @@ async function _postToS4AndPersist(tx, {
 
   try {
     const res = await executeHttpRequest(
-      { destinationName: S4_DESTINATION_NAME },
+      { destinationName },
       {
       method: 'POST',
       url,
@@ -335,6 +347,12 @@ async function _postToS4AndPersist(tx, {
   }
 
   const correlationId = _extractCorrelationId(responseHeaders, errorHeaders);
+  console.log('[SAP_POST_RESULT]', {
+    processCode,
+    entitySet,
+    status,
+    correlationId
+  });
   const sapObjectKey = _extractSapObjectKey(responseBody);
   const payloadJson = _stringifySafe(payload) || '{}';
   const responseJson = _stringifySafe(responseBody) || '';
@@ -441,7 +459,8 @@ async function _postToS4AndPersist(tx, {
     entitySet,
     httpStatus: status,
     finalStatus,
-    skippedFields
+    skippedFields,
+    sapObjectKey
   };
 }
 
@@ -454,15 +473,15 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     ? (req.data.COMMENT ?? req.data.comment).trim()
     : '';
 
-  if (!requestId) req.reject(400, 'ID is required');
+  if (!requestId) req.reject(400, _t(req, 'idRequired'));
 
   const request = await getRequestById(tx, requestId);
-  if (!request) req.reject(404, `Request not found: ${requestId}`);
-  if (request.ISDELETED) req.reject(409, 'Request is deleted');
+  if (!request) req.reject(404, _t(req, 'requestNotFound', { requestId }));
+  if (request.ISDELETED) req.reject(409, _t(req, 'requestDeleted'));
 
   const status = normalizeStatus(request.STATUS);
   if (status !== STATUS.IN_REVIEW) {
-    req.reject(409, `Action ${actionName} is only allowed when request is IN_REVIEW`);
+    req.reject(409, _t(req, 'actionOnlyInReview', { actionName }));
   }
 
   const assignments = await getUserRoleAssignments(tx, req, {
@@ -472,7 +491,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
 
   const manager = findAssignment(assignments, ROLE_CODES.APPROVER);
   if (!manager) {
-    req.reject(403, 'Only MANAGER (ROLE_CODE=APPROVER) can execute this action');
+    req.reject(403, _t(req, 'onlyManagerCanExecute'));
   }
 
   let approveResult = null;
@@ -480,17 +499,17 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     const process = await _resolveProcessForRequest(tx, requestId);
     const processCode = process?.PROCESS_CODE || null;
     const processId = process?.PROCESS_ID || request.PROCESS_ID;
-    const entitySet = PROCESS_TO_ENTITYSET[processCode];
-    if (!entitySet) {
-      req.reject(400, `Unsupported process for S/4 submit: ${processCode || 'UNKNOWN'}`);
+    const sapTarget = await _resolveSapTargetConfig(tx, { processId, operation: 'POST' });
+    if (!sapTarget?.entitySet || !sapTarget?.destinationName || !sapTarget?.servicePath) {
+      req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
     }
 
-    const { payload, skippedFields } = await _buildSapPayload(tx, requestId, entitySet, processId);
+    const { payload, skippedFields } = await _buildSapPayload(tx, requestId, sapTarget.entitySet, processId);
     approveResult = await _postToS4AndPersist(tx, {
       requestId,
       processId,
       processCode,
-      entitySet,
+      sapTarget,
       payload,
       userId,
       previousStatus: status,
@@ -526,6 +545,19 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
       authorUser: userId,
       authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
       message: comment
+    });
+  }
+
+  if (actionName === 'APPROVE' && approveResult?.ok) {
+    const objectKey = String(approveResult?.sapObjectKey || '').trim();
+    const successMessage = objectKey
+      ? `Aprobación enviada exitosamente a SAP. ID generado: ${objectKey}.`
+      : `Aprobación enviada exitosamente a SAP (HTTP ${approveResult?.httpStatus ?? 200}).`;
+    await insertComment(tx, {
+      requestId,
+      authorUser: userId,
+      authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
+      message: successMessage
     });
   }
 

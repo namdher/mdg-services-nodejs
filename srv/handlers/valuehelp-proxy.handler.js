@@ -1,5 +1,4 @@
 const cds = require('@sap/cds');
-const { SELECT } = cds;
 const { s4Get } = require('./_lib/s4.client');
 const { getQueryOptions, pickODataOptions, applyLocalFilter, applyLocalPaging } = require('./_lib/odata.util');
 
@@ -166,7 +165,11 @@ function _escapeODataLiteral(value) {
 
 function _getContextInput(req, q) {
   const payloadContext = req?.data?.context;
-  const queryContext = q?.context;
+  const queryContext =
+    q?.context ??
+    req?._?.query?.context ??
+    req?._?.req?.query?.context ??
+    req?.req?.query?.context;
   const raw = payloadContext ?? queryContext;
   if (!raw) return {};
   if (typeof raw === 'object') return raw;
@@ -183,6 +186,28 @@ function _getRequestIdInput(req, q) {
     req?.data?.REQUEST_ID ??
     q?.requestId ??
     q?.REQUEST_ID ??
+    req?._?.query?.requestId ??
+    req?._?.query?.REQUEST_ID ??
+    req?._?.req?.query?.requestId ??
+    req?._?.req?.query?.REQUEST_ID ??
+    req?.req?.query?.requestId ??
+    req?.req?.query?.REQUEST_ID ??
+    ''
+  ).trim();
+}
+
+function _getFieldCodeInput(req, q) {
+  return String(
+    req?.data?.fieldCode ??
+    req?.data?.FIELD_CODE ??
+    q?.fieldCode ??
+    q?.FIELD_CODE ??
+    req?._?.query?.fieldCode ??
+    req?._?.query?.FIELD_CODE ??
+    req?._?.req?.query?.fieldCode ??
+    req?._?.req?.query?.FIELD_CODE ??
+    req?.req?.query?.fieldCode ??
+    req?.req?.query?.FIELD_CODE ??
     ''
   ).trim();
 }
@@ -190,9 +215,11 @@ function _getRequestIdInput(req, q) {
 async function _getVhFieldCodes(tx, vhName) {
   if (!vhName) return [];
   const rows = await tx.run(
-    SELECT.from('MDG_FIELD_CATALOG')
-      .columns('FIELD_CODE')
-      .where({ VH_SERVICE: 'CAP', VH_ENTITYSET: vhName })
+    `SELECT "FIELD_CODE"
+       FROM "MDG_FIELD_CATALOG"
+      WHERE "VH_SERVICE" = 'CAP'
+        AND "VH_ENTITYSET" = ?`,
+    [vhName]
   );
   return (rows || [])
     .map((row) => String(row.FIELD_CODE || '').trim())
@@ -203,10 +230,18 @@ async function _loadVhDependencies(tx, fieldCode) {
   if (!fieldCode) return [];
   try {
     return await tx.run(
-      SELECT.from('MDG_FIELD_VH_DEPENDENCY')
-        .columns('FIELD_CODE', 'DEPENDS_ON_FIELD_CODE', 'VH_PROPERTY_NAME', 'REQUIRED', 'EVALUATION_ORDER', 'IS_ACTIVE')
-        .where({ FIELD_CODE: fieldCode, IS_ACTIVE: true })
-        .orderBy('EVALUATION_ORDER asc')
+      `SELECT
+          "FIELD_CODE",
+          "DEPENDS_ON_FIELD_CODE",
+          "VH_PROPERTY_NAME",
+          "REQUIRED",
+          "EVALUATION_ORDER",
+          "IS_ACTIVE"
+         FROM "MDG_FIELD_VH_DEPENDENCY"
+        WHERE "FIELD_CODE" = ?
+          AND "IS_ACTIVE" = true
+        ORDER BY "EVALUATION_ORDER" ASC`,
+      [fieldCode]
     );
   } catch (_) {
     // Backward compatible path if dependency table not present in a landscape.
@@ -217,13 +252,15 @@ async function _loadVhDependencies(tx, fieldCode) {
 async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
   if (!requestId || !fieldCode) return null;
   const rows = await tx.run(
-    SELECT.from('MDG_REQUEST_FIELD_VALUE as rv')
-      .columns('rv.VALUE as VALUE')
-      .join('MDG_FIELD_CATALOG as fc')
-      .on('fc.ID = rv.FIELD_ID')
-      .where({ 'rv.REQUEST_ID': requestId, 'fc.FIELD_CODE': fieldCode })
-      .orderBy('rv.LINE_NO asc')
-      .limit(1)
+    `SELECT rv."VALUE" AS "VALUE"
+       FROM "MDG_REQUEST_FIELD_VALUE" rv
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = rv."FIELD_ID"
+      WHERE rv."REQUEST_ID" = ?
+        AND fc."FIELD_CODE" = ?
+      ORDER BY rv."LINE_NO" ASC
+      LIMIT 1`,
+    [requestId, fieldCode]
   );
   const value = rows?.[0]?.VALUE;
   return value === undefined || value === null ? null : String(value).trim();
@@ -369,7 +406,8 @@ async function readCustomerOrgV(req) {
   const localSkip = q.$skip;
   const remoteQ = { ...q };
   delete remoteQ.$filter;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerOrgV', cfg.fieldCode, q, remoteQ);
+  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerOrgV', depFieldCode, q, remoteQ);
   if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
@@ -407,7 +445,8 @@ async function readCustomerGen(req) {
   delete remoteQ.search;
   delete remoteQ.q;
 
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerGen', cfg.fieldCode, q, remoteQ);
+  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerGen', depFieldCode, q, remoteQ);
   if (depState.missingRequired) return [];
 
   const depFilterOnly = remoteQ.$filter ? String(remoteQ.$filter) : '';
@@ -459,7 +498,8 @@ async function readCustomerVtweg(req) {
   const localSkip = q.$skip;
   const remoteQ = { ...q };
   delete remoteQ.$filter;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerVtweg', cfg.fieldCode, q, remoteQ);
+  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerVtweg', depFieldCode, q, remoteQ);
   if (depState.missingRequired) return [];
   if (!remoteQ.$filter) {
     const depVkorg = _extractEqValue(localFilter, 'Vkorg');
@@ -498,7 +538,8 @@ async function readCustomerSpart(req) {
   const localSkip = q.$skip;
   const remoteQ = { ...q };
   delete remoteQ.$filter;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSpart', cfg.fieldCode, q, remoteQ);
+  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSpart', depFieldCode, q, remoteQ);
   if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
@@ -542,7 +583,8 @@ async function readCustomerSoc(req) {
   }
 
   delete remoteQ.$filter;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSoc', depFieldCode, q, remoteQ);
+  const effectiveDepFieldCode = _getFieldCodeInput(req, q) || depFieldCode;
+  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSoc', effectiveDepFieldCode, q, remoteQ);
   if (depState.missingRequired) return [];
   if (localFilter || localSearch) {
     delete remoteQ.$top;
@@ -619,7 +661,7 @@ async function readVH(req, vhName) {
   );
   const remoteQ = { ...q };
   let forceLocalFilter = false;
-  let fieldCode = String(cfg.fieldCode || '').trim();
+  let fieldCode = _getFieldCodeInput(req, q) || String(cfg.fieldCode || '').trim();
   if (!fieldCode) {
     const fieldCodes = await _getVhFieldCodes(tx, vhName);
     if (fieldCodes.length === 1) fieldCode = fieldCodes[0];
