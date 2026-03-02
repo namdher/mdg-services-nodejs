@@ -21,11 +21,26 @@ function addInValues(req, field, values) {
   addWhere(req, [{ ref: [field] }, 'in', { list: values.map((v) => ({ val: v })) }]);
 }
 
+function readEqualsLiteralFromWhere(where = [], field) {
+  if (!Array.isArray(where) || !field) return null;
+  for (let i = 0; i < where.length - 2; i++) {
+    const left = where[i];
+    const op = where[i + 1];
+    const right = where[i + 2];
+    if (!left || typeof left !== 'object' || !Array.isArray(left.ref)) continue;
+    if (String(left.ref[0] || '') !== String(field)) continue;
+    if (op !== '=') continue;
+    if (!right || typeof right !== 'object' || right.val === undefined || right.val === null) continue;
+    return String(right.val);
+  }
+  return null;
+}
+
 function requestedEntityId(req) {
   return req.data?.ID || req.params?.[0]?.ID || null;
 }
 
-async function getAllowedRequestIds(tx, req, { mtoOnly = false, excludeDeleted = false } = {}) {
+async function getAllowedRequestIds(tx, req, { frontCode = null, excludeDeleted = false } = {}) {
   const { resolvedGroups } = await resolveGroups(req);
   if (!resolvedGroups?.length) return [];
 
@@ -55,10 +70,12 @@ async function getAllowedRequestIds(tx, req, { mtoOnly = false, excludeDeleted =
                   )
                 )`;
 
-  if (mtoOnly) sql += ` AND r."FRONT_CODE" = 'MTO'`;
+  if (frontCode) sql += ` AND r."FRONT_CODE" = ?`;
   if (excludeDeleted) sql += ` AND COALESCE(r."ISDELETED", false) = false`;
 
-  const rows = await tx.run(sql, resolvedGroups);
+  const params = [...resolvedGroups];
+  if (frontCode) params.push(frontCode);
+  const rows = await tx.run(sql, params);
   return rows.map((row) => row.ID);
 }
 
@@ -78,12 +95,27 @@ async function ensureRequestAccess(tx, req, requestId) {
 
 async function beforeReadRequestsOverview(req) {
   const tx = cds.tx(req);
+  const requestId = requestedEntityId(req);
+
+  // Key reads (single request) must not force default FRONT_CODE=MTO.
+  // Otherwise FTD (or other fronts) are filtered out even with a valid ID.
+  if (requestId) {
+    const allowedRequestIds = await getAllowedRequestIds(tx, req, {
+      excludeDeleted: true
+    });
+    addEquals(req, 'ISDELETED', false);
+    addInValues(req, 'ID', allowedRequestIds);
+    return;
+  }
+
+  const requestedFrontCode = readEqualsLiteralFromWhere(req.query?.SELECT?.where, 'FRONT_CODE');
+  const effectiveFrontCode = requestedFrontCode || 'MTO';
   const allowedRequestIds = await getAllowedRequestIds(tx, req, {
-    mtoOnly: true,
+    frontCode: effectiveFrontCode,
     excludeDeleted: true
   });
 
-  addEquals(req, 'FRONT_CODE', 'MTO');
+  if (!requestedFrontCode) addEquals(req, 'FRONT_CODE', effectiveFrontCode);
   addEquals(req, 'ISDELETED', false);
   addInValues(req, 'ID', allowedRequestIds);
 }

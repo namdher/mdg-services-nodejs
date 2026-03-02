@@ -31,6 +31,27 @@ const VH_MAP = {
     searchFields: ['Kunnr', 'Name1']
   },
   VH_CustomerClassification: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS', entitySet: 'I_CustomerClassification', keyField: 'CustomerClassification', searchFields: ['CustomerClassification', 'CustomerClassification_Text'], filterMode: 'local' },
+  VH_MaterialProduct: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+    entitySet: 'I_Material',
+    keyField: 'Material',
+    fieldCode: 'MVKE.PRODUCT',
+    searchFields: ['Material', 'Material_Text']
+  },
+  VH_MaterialSalesOrg: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+    entitySet: 'I_SalesOrganization',
+    keyField: 'SalesOrganization',
+    fieldCode: 'MVKE.VKORG',
+    searchFields: ['SalesOrganization', 'SalesOrganization_Text']
+  },
+  VH_MaterialVtweg: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+    entitySet: 'I_DistributionChainCountry',
+    keyField: 'ProductDistributionChnl',
+    fieldCode: 'MVKE.VTWEG',
+    searchFields: ['ProductDistributionChnl', 'ProductDistributionChnl_Text', 'ProductSalesOrg']
+  },
   VH_CustomerOrgV: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_SalesOrganization', syntheticKey: true, keyParts: ['Vkorg'], fieldCode: 'KNVV.VKORG' },
   VH_CustomerVtweg: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_DistributionChainCountry', syntheticKey: true, keyParts: ['Vkorg', 'Vtweg'], fieldCode: 'KNVV.VTWEG' },
   VH_CustomerSpart: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_Division', syntheticKey: true, keyParts: ['Spart'], fieldCode: 'KNVV.SPART' },
@@ -99,8 +120,11 @@ function mapCustomerGenRows(rows) {
 }
 
 function _translateCustomerGenFilterToRemote(filterExpr) {
-  const src = String(filterExpr || '').trim();
+  let src = String(filterExpr || '').trim();
   if (!src) return '';
+  // Normalize contains(...) to OData V2 substringof(...), keeping field/value order.
+  src = src.replace(/contains\(\s*([A-Za-z0-9_]+)\s*,\s*'((?:''|[^'])*)'\s*\)/gi, "substringof('$2',$1)");
+  src = src.replace(/contains\(\s*'((?:''|[^'])*)'\s*,\s*([A-Za-z0-9_]+)\s*\)/gi, "substringof('$1',$2)");
   return src
     .replace(/\bKunnr\b/g, 'BusinessPartner')
     .replace(/\bPartner\b/g, 'BusinessPartner')
@@ -125,13 +149,18 @@ function _translateCustomerGenSelectToRemote(selectExpr) {
 async function _fetchCustomerGenLocalWindow({ cfg, baseRemoteQuery, localFilter, localSearch, localTop, localSkip }) {
   const target = Math.max(Number(localSkip || 0), 0) + Math.max(Number(localTop || 0), 0);
   const batchSize = 500;
-  const maxScan = 50000;
+  const maxScan = 0; // 0 => no hard cap (prioritize correctness for VH search)
   let scanned = 0;
   let offset = 0;
   let aggregated = [];
+  const exhaustiveSearch = Boolean(localFilter || localSearch);
 
-  while (aggregated.length < target && scanned < maxScan) {
+  while ((exhaustiveSearch || aggregated.length < target) && (!maxScan || scanned < maxScan)) {
     const q = { ...baseRemoteQuery, $top: batchSize, $skip: offset };
+    // Safety net: never propagate unsupported contains(...) to S/4.
+    if (q.$filter && /contains\s*\(/i.test(String(q.$filter))) {
+      delete q.$filter;
+    }
     const remoteRows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: q });
     if (!remoteRows.length) break;
 
@@ -145,7 +174,7 @@ async function _fetchCustomerGenLocalWindow({ cfg, baseRemoteQuery, localFilter,
     if (remoteRows.length < batchSize) break;
   }
 
-  if (scanned >= maxScan) {
+  if (maxScan && scanned >= maxScan) {
     console.warn(`[VH_CustomerGen] local fallback reached scan cap ${maxScan}`);
   }
   return applyLocalPaging(aggregated, localTop, localSkip);
@@ -444,6 +473,9 @@ async function readCustomerGen(req) {
   delete remoteQ.$search;
   delete remoteQ.search;
   delete remoteQ.q;
+  // Never pass raw UI $filter (often contains/substringof over local field names) directly to S/4.
+  // We rebuild a safe translated filter after dependency resolution.
+  delete remoteQ.$filter;
 
   const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
   const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerGen', depFieldCode, q, remoteQ);
@@ -451,14 +483,21 @@ async function readCustomerGen(req) {
 
   const depFilterOnly = remoteQ.$filter ? String(remoteQ.$filter) : '';
   const translatedFilter = _translateCustomerGenFilterToRemote(localFilter);
-  if (localFilter) {
+  const safeRemoteFilter = translatedFilter && !/contains\s*\(/i.test(translatedFilter);
+  if (localFilter && safeRemoteFilter) {
     remoteQ.$filter = depFilterOnly
       ? `(${depFilterOnly}) and (${translatedFilter})`
       : translatedFilter;
+  } else if (localFilter && depFilterOnly) {
+    remoteQ.$filter = depFilterOnly;
   }
 
   const translatedSelect = _translateCustomerGenSelectToRemote(q.$select);
   if (translatedSelect) remoteQ.$select = translatedSelect;
+  // Safety net: avoid sending unsupported contains(...) in any case.
+  if (remoteQ.$filter && /contains\s*\(/i.test(String(remoteQ.$filter))) {
+    delete remoteQ.$filter;
+  }
 
   let rows;
   try {
@@ -739,6 +778,9 @@ async function readVH(req, vhName) {
 module.exports = {
   readCustomerGen,
   readCustomerClassification: (req) => readVH(req, 'VH_CustomerClassification'),
+  readMaterialProduct: (req) => readVH(req, 'VH_MaterialProduct'),
+  readMaterialSalesOrg: (req) => readVH(req, 'VH_MaterialSalesOrg'),
+  readMaterialVtweg: (req) => readVH(req, 'VH_MaterialVtweg'),
   readCustomerOrgV,
   readCustomerVtweg,
   readCustomerSpart,

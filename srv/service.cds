@@ -54,28 +54,8 @@ service MDGService @(path:'/mdg') {
         end
       as String(200)) as FIELD_LABEL,
       l.LINE_NO,
-      cast(
-        case
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'DRAFT' then 'Borrador'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'IN_REVIEW' then 'En revisión'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'REWORK' then 'Devuelto'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'APPROVED' then 'Aprobado'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'SUBMITTED' then 'Enviado'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.OLD_VALUE = 'ERROR' then 'Error'
-          else l.OLD_VALUE
-        end
-      as String(5000)) as OLD_VALUE,
-      cast(
-        case
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'DRAFT' then 'Borrador'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'IN_REVIEW' then 'En revisión'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'REWORK' then 'Devuelto'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'APPROVED' then 'Aprobado'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'SUBMITTED' then 'Enviado'
-          when l.FIELD_CODE = 'MDG_REQUEST_HEADER.STATUS' and l.NEW_VALUE = 'ERROR' then 'Error'
-          else l.NEW_VALUE
-        end
-      as String(5000)) as NEW_VALUE,
+      l.OLD_VALUE,
+      l.NEW_VALUE,
       l.CHANGE_TYPE,
       cast(
         case
@@ -195,6 +175,22 @@ service MDGService @(path:'/mdg') {
   @cds.persistence.skip @readonly entity VH_CustomerClassification {
     key CustomerClassification      : String(2);
     CustomerClassification_Text     : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_MaterialProduct {
+    key Material        : String(40);
+    Material_Text       : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_MaterialSalesOrg {
+    key SalesOrganization      : String(4);
+    SalesOrganization_Text     : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_MaterialVtweg {
+    key ProductDistributionChnl      : String(2);
+    ProductDistributionChnl_Text     : String(80);
+    ProductSalesOrg                  : String(4);
   }
 
   @cds.persistence.skip @readonly entity VH_DriverGen {

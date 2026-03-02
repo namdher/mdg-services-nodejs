@@ -11,6 +11,7 @@ module.exports = cds.service.impl(async function () {
   const overviewVh = require('./handlers/overview-vh.handler');
   const overviewEnrichment = require('./handlers/overview-enrichment.handler');
   const readAccess = require('./handlers/read-access.handler');
+  const changeLogEnrichment = require('./handlers/change-log-enrichment.handler');
   const s4Metadata = require('./handlers/s4-metadata.handler');
   const requestCrud = require('./handlers/request-crud.handler');
   const comments = require('./handlers/comments.handler');
@@ -28,6 +29,9 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_CustomerBan', vh.readCustomerBan);
   this.on('READ', 'VH_CustomerImp', vh.readCustomerImp);
   this.on('READ', 'VH_CustomerNif', vh.readCustomerNif);
+  this.on('READ', 'VH_MaterialProduct', vh.readMaterialProduct);
+  this.on('READ', 'VH_MaterialSalesOrg', vh.readMaterialSalesOrg);
+  this.on('READ', 'VH_MaterialVtweg', vh.readMaterialVtweg);
   this.on('READ', 'VH_DriverGen', vh.readDriverGen);
   this.on('READ', 'VH_DriverRol', vh.readDriverRol);
   this.on('READ', 'VH_DriverCom', vh.readDriverCom);
@@ -63,6 +67,7 @@ module.exports = cds.service.impl(async function () {
   this.before('READ', 'RequestValues', readAccess.beforeReadRequestValues);
   this.before('READ', 'RequestComments', readAccess.beforeReadRequestComments);
   this.before('READ', 'RequestFieldChangeLogs', readAccess.beforeReadRequestFieldChangeLogs);
+  this.after('READ', 'RequestFieldChangeLogs', changeLogEnrichment.afterReadRequestFieldChangeLogs);
 
   this.on('whoAmI', auth.whoAmI);
   this.on('getAvailableProcesses', process.getAvailableProcesses);
