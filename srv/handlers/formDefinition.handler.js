@@ -6,6 +6,29 @@ const { resolveGroups } = require('./auth.handler')
 
 const DEFAULT_FIELD_CONTROL = 0
 
+function _toLocalIsoDate(value = new Date()) {
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function _isDateLikeDataType(dataType) {
+  const dt = String(dataType || '').trim().toUpperCase()
+  return dt.includes('DATE') || dt.includes('TIME')
+}
+
+function _resolveDefaultToken(defaultValue, dataType) {
+  if (defaultValue === null || defaultValue === undefined) return null
+  const raw = String(defaultValue)
+  const token = raw.trim().toUpperCase()
+  if (!_isDateLikeDataType(dataType)) return raw
+  if (token === 'TODAY' || token === '$NOW_DATE' || token === 'NOW' || token === '$NOW') {
+    return _toLocalIsoDate()
+  }
+  return raw
+}
+
 async function _getProcess(tx, processCode) {
   const rows = await tx.run(
     `SELECT "ID","PROCESS_CODE","NAME","MASTER_OBJECT_ID","WF_VERSION","IS_ENABLED"
@@ -180,7 +203,7 @@ async function getFormDefinition(req) {
     isMulti: r.IS_MULTI,
 
     fieldControl: r.FIELD_CONTROL,
-    defaultValue: r.DEFAULT_VALUE,
+    defaultValue: _resolveDefaultToken(r.DEFAULT_VALUE, r.DATA_TYPE),
 
     vhDestination: r.VH_DESTINATION,
     vhService: r.VH_SERVICE,

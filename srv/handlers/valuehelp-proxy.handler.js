@@ -1,6 +1,7 @@
 const cds = require('@sap/cds');
 const { s4Get } = require('./_lib/s4.client');
 const { getQueryOptions, pickODataOptions, applyLocalFilter, applyLocalPaging } = require('./_lib/odata.util');
+const MAX_VH_CONTEXT_CHARS = Number(process.env.MDG_VH_MAX_CONTEXT_CHARS || 4000);
 
 /*
   Driver VH mapping (CAP -> S/4):
@@ -202,8 +203,15 @@ function _getContextInput(req, q) {
   const raw = payloadContext ?? queryContext;
   if (!raw) return {};
   if (typeof raw === 'object') return raw;
+  const rawStr = String(raw);
+  if (rawStr.length > MAX_VH_CONTEXT_CHARS) {
+    req.reject(
+      400,
+      `Value help context too large (${rawStr.length} chars). Send only dependency fields in context.`
+    );
+  }
   try {
-    return JSON.parse(String(raw));
+    return JSON.parse(rawStr);
   } catch (_) {
     return {};
   }
@@ -434,6 +442,9 @@ async function readCustomerOrgV(req) {
   const localTop = q.$top;
   const localSkip = q.$skip;
   const remoteQ = { ...q };
+  // Local contract fields (Vkorg, VkorgText) differ from remote canonical names.
+  // Do not forward UI $select directly to S/4.
+  delete remoteQ.$select;
   delete remoteQ.$filter;
   const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
   const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerOrgV', depFieldCode, q, remoteQ);
@@ -536,6 +547,8 @@ async function readCustomerVtweg(req) {
   const localTop = q.$top;
   const localSkip = q.$skip;
   const remoteQ = { ...q };
+  // Local contract fields differ from remote canonical names.
+  delete remoteQ.$select;
   delete remoteQ.$filter;
   const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
   const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerVtweg', depFieldCode, q, remoteQ);
@@ -576,6 +589,8 @@ async function readCustomerSpart(req) {
   const localTop = q.$top;
   const localSkip = q.$skip;
   const remoteQ = { ...q };
+  // Local contract fields differ from remote canonical names.
+  delete remoteQ.$select;
   delete remoteQ.$filter;
   const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
   const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSpart', depFieldCode, q, remoteQ);
@@ -611,6 +626,8 @@ async function readCustomerSoc(req) {
   const localTop = q.$top;
   const localSkip = q.$skip;
   const remoteQ = { ...q };
+  // Local contract fields differ from remote canonical names.
+  delete remoteQ.$select;
 
   let entitySet = 'I_CompanyCode';
   let depFieldCode = 'KNB1.BUKRS';

@@ -36,6 +36,14 @@ function _toNumber(raw) {
   return { ok: true, value: n };
 }
 
+function _toDecimalString(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { ok: false, reason: 'empty_decimal' };
+  // Accept canonical decimal format used by OData V2 payloads.
+  if (!/^-?\d+(\.\d+)?$/.test(text)) return { ok: false, reason: `invalid_decimal:${text}` };
+  return { ok: true, value: text };
+}
+
 function _toODataV2DateTime(raw) {
   const text = String(raw ?? '').trim();
   if (!text) return { ok: false, reason: 'empty_datetime' };
@@ -60,7 +68,33 @@ function _toODataV2DateTime(raw) {
     return { ok: true, value: `/Date(${ms})/` };
   }
 
-  // Reject plain numeric values to avoid accidental year conversion (e.g. "45847" -> +045847-...)
+  // Compact YYYYMMDD (common SAP/legacy date representation)
+  const ymdCompact = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (ymdCompact) {
+    const y = Number(ymdCompact[1]);
+    const m = Number(ymdCompact[2]);
+    const d = Number(ymdCompact[3]);
+    const ms = Date.UTC(y, m - 1, d, 0, 0, 0, 0);
+    const dt = new Date(ms);
+    if (Number.isNaN(dt.getTime())) return { ok: false, reason: `invalid_datetime:${text}` };
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() + 1 !== m || dt.getUTCDate() !== d) {
+      return { ok: false, reason: `invalid_datetime:${text}` };
+    }
+    return { ok: true, value: `/Date(${ms})/` };
+  }
+
+  // Excel-like serial date (days since 1899-12-30), used by some UI/date libs.
+  // Example: 45847 -> 2025-07-09
+  if (/^\d{1,6}$/.test(text)) {
+    const serial = Number(text);
+    if (Number.isFinite(serial) && serial >= 1 && serial <= 100000) {
+      const excelEpochUtcMs = Date.UTC(1899, 11, 30, 0, 0, 0, 0);
+      const ms = excelEpochUtcMs + (serial * 24 * 60 * 60 * 1000);
+      return { ok: true, value: `/Date(${ms})/` };
+    }
+  }
+
+  // Reject other plain numeric values to avoid accidental year conversion
   if (/^-?\d+$/.test(text)) {
     return { ok: false, reason: `invalid_datetime_numeric:${text}` };
   }
@@ -89,6 +123,7 @@ function convertValueForSap(raw, { edmType, fallbackDataType } = {}) {
     case 'Edm.Int64':
       return _toInteger(raw);
     case 'Edm.Decimal':
+      return _toDecimalString(raw);
     case 'Edm.Double':
     case 'Edm.Single':
       return _toNumber(raw);

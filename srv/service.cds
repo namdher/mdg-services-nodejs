@@ -1,4 +1,4 @@
-using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT, MDG_REQUEST_FIELD_CHANGE_LOG, MDG_FIELD_CATALOG, MDG_PROCESS } from '../db/model';
+using { MDG_REQUEST_HEADER, MDG_REQUEST_FIELD_VALUE, MDG_REQUEST_COMMENT, MDG_REQUEST_FIELD_CHANGE_LOG, MDG_REQUEST_ACTION_LOG, MDG_REQUEST_SAP_MESSAGE, MDG_FIELD_CATALOG, MDG_PROCESS } from '../db/model';
 
 service MDGService @(path:'/mdg') {
 
@@ -35,6 +35,8 @@ service MDGService @(path:'/mdg') {
   };
   entity RequestValues as projection on MDG_REQUEST_FIELD_VALUE;
   entity RequestComments as projection on MDG_REQUEST_COMMENT;
+  entity RequestActions as projection on MDG_REQUEST_ACTION_LOG;
+  entity RequestSapMessages as projection on MDG_REQUEST_SAP_MESSAGE;
   @readonly entity RequestFieldChangeLogs as select from MDG_REQUEST_FIELD_CHANGE_LOG as l
     left join MDG_FIELD_CATALOG as fc on fc.ID = l.FIELD_ID {
       key l.ID,
@@ -368,6 +370,7 @@ service MDGService @(path:'/mdg') {
     key ID          : UUID;
     PROCESS_CODE    : String(80);
     NAME            : String(150);
+    FRONT_CODE      : String(30);
   }
 
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
@@ -452,11 +455,13 @@ annotate MDGService.RequestsOverview with @UI.SelectionFields: [
 
 annotate MDGService.RequestsOverview with {
   PROCESS_CODE @UI.Hidden: true;
+  FRONT_CODE @UI.Hidden: true;
   PROCESS_ID @Common.Label: 'Proceso';
   PROCESS_ID @Common.ValueList: {
     CollectionPath: 'VH_AllowedProcesses',
     Parameters: [
       { $Type: 'Common.ValueListParameterInOut', LocalDataProperty: PROCESS_ID, ValueListProperty: 'ID' },
+      { $Type: 'Common.ValueListParameterIn', LocalDataProperty: FRONT_CODE, ValueListProperty: 'FRONT_CODE' },
       { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'PROCESS_CODE' },
       { $Type: 'Common.ValueListParameterDisplayOnly', ValueListProperty: 'NAME' }
     ]
@@ -495,6 +500,7 @@ annotate MDGService.VH_AllowedProcesses with {
   ID @Common.Label: 'ID Proceso';
   PROCESS_CODE @Common.Label: 'Código Proceso';
   NAME @Common.Label: 'Proceso';
+  FRONT_CODE @UI.Hidden: true;
 };
 
 annotate MDGService.RequestFieldChangeLogs with @UI.LineItem: [

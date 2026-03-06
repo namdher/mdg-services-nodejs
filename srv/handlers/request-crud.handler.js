@@ -109,14 +109,217 @@ function toLocalIsoDate(value = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function resolveDefaultValue(defaultBase) {
+function isDateLikeDataType(dataType) {
+  const dt = String(dataType || '').trim().toUpperCase();
+  return dt.includes('DATE') || dt.includes('TIME');
+}
+
+function resolveDefaultValue(defaultBase, dataType) {
   if (defaultBase === null || defaultBase === undefined) return null;
   const raw = String(defaultBase);
   const token = raw.trim().toUpperCase();
-  if (token === '$NOW_DATE' || token === 'TODAY') {
+  if (!isDateLikeDataType(dataType)) return raw;
+  if (token === '$NOW_DATE' || token === 'TODAY' || token === 'NOW' || token === '$NOW') {
     return toLocalIsoDate();
   }
   return raw;
+}
+
+function parseBooleanLike(value) {
+  if (value === true || value === false) return value;
+  if (value === null || value === undefined) return false;
+  const v = String(value).trim().toLowerCase();
+  if (!v) return false;
+  return v === 'true' || v === 'x' || v === '1' || v === 'y' || v === 'yes' || v === 'si' || v === 'sí';
+}
+
+async function getRequesterRoleId(tx, processId) {
+  const rows = await tx.run(
+    `SELECT "ID"
+       FROM "MDG_PROCESS_ROLE"
+      WHERE "PROCESS_ID" = ?
+        AND "ROLE_CODE" = 'REQUESTER'
+        AND "IS_ENABLED" = true
+      ORDER BY "ID"
+      LIMIT 1`,
+    [processId]
+  );
+  return rows?.[0]?.ID || null;
+}
+
+function isNonEmpty(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function normalizeRequestValueInput(value) {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch (_err) {
+    return String(value);
+  }
+}
+
+async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
+  const reqRows = await tx.run(
+    `SELECT r."PROCESS_ID" AS "PROCESS_ID", r."COUNTRY_CODE" AS "COUNTRY_CODE", p."PROCESS_CODE" AS "PROCESS_CODE"
+       FROM "MDG_REQUEST_HEADER" r
+       JOIN "MDG_PROCESS" p ON p."ID" = r."PROCESS_ID"
+      WHERE r."ID" = ?`,
+    [requestId]
+  );
+  const request = reqRows?.[0];
+  if (!request || String(request.PROCESS_CODE || '').trim().toUpperCase() !== 'CUSTOMER_CREATION') return 0;
+
+  const ctrlRows = await tx.run(
+    `SELECT v."VALUE" AS "VALUE"
+       FROM "MDG_REQUEST_FIELD_VALUE" v
+       JOIN "MDG_FIELD_CATALOG" c ON c."ID" = v."FIELD_ID"
+      WHERE v."REQUEST_ID" = ?
+        AND c."FIELD_CODE" = 'MDG_CTRL.CREATE_DESTFACT'
+      ORDER BY v."LINE_NO", v."ID"
+      LIMIT 1`,
+    [requestId]
+  );
+  const createDestFact = parseBooleanLike(ctrlRows?.[0]?.VALUE);
+  if (!createDestFact) return 0;
+
+  const requesterRoleId = await getRequesterRoleId(tx, request.PROCESS_ID);
+  if (!requesterRoleId) return 0;
+
+  const destRows = await tx.run(
+    `SELECT
+        d."ID" AS "FIELD_ID",
+        d."FIELD_CODE" AS "FIELD_CODE",
+        d."SAP_FIELD" AS "SAP_FIELD",
+        COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) AS "EFFECTIVE_CONTROL"
+       FROM "MDG_PROCESS_BLOCK" pb
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" d
+         ON d."ID" = bf."FIELD_ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = ?
+        AND fcb."FIELD_ID" = d."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = ?
+        AND fcc."FIELD_ID" = d."ID"
+        AND fcc."COUNTRY_CODE" = ?
+      WHERE pb."PROCESS_ID" = ?
+        AND d."FIELD_CODE" LIKE 'BUT000-KNA1.%'
+        AND d."SAP_FIELD" IS NOT NULL
+        AND LENGTH(TRIM(d."SAP_FIELD")) > 0`,
+    [requesterRoleId, requesterRoleId, request.COUNTRY_CODE, request.PROCESS_ID]
+  );
+  const readonlyDest = (destRows || [])
+    .filter((r) => Number(r.EFFECTIVE_CONTROL) === FIELD_CONTROL.READ_ONLY)
+    .map((r) => ({
+      fieldId: r.FIELD_ID,
+      fieldCode: String(r.FIELD_CODE || '').trim(),
+      sapField: String(r.SAP_FIELD || '').trim()
+    }))
+    .filter((r) => r.fieldId && r.sapField)
+    .filter((r) => r.fieldCode !== 'BUT000-KNA1.KTOKD');
+  const readonlyDedup = new Map();
+  for (const row of readonlyDest) {
+    const key = String(row.fieldCode || '').trim().toUpperCase();
+    if (!key) continue;
+    if (!readonlyDedup.has(key)) readonlyDedup.set(key, row);
+  }
+  const readonlyDestScoped = [...readonlyDedup.values()];
+  if (!readonlyDestScoped.length) return 0;
+
+  const values = await tx.run(
+    `SELECT
+        c."ID" AS "FIELD_ID",
+        c."FIELD_CODE" AS "FIELD_CODE",
+        c."SAP_FIELD" AS "SAP_FIELD",
+        v."ID" AS "VALUE_ID",
+        v."LINE_NO" AS "LINE_NO",
+        v."VALUE" AS "VALUE"
+       FROM "MDG_PROCESS_BLOCK" pb
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" c
+         ON c."ID" = bf."FIELD_ID"
+       LEFT JOIN "MDG_REQUEST_FIELD_VALUE" v
+         ON v."FIELD_ID" = c."ID"
+        AND v."REQUEST_ID" = ?
+      WHERE pb."PROCESS_ID" = ?
+        AND (c."FIELD_CODE" LIKE 'KNA1.%'
+         OR c."FIELD_CODE" LIKE 'BUT000-KNA1.%')
+      ORDER BY
+        c."FIELD_CODE",
+        CASE WHEN v."LINE_NO" = 1 THEN 0 ELSE 1 END,
+        v."LINE_NO",
+        v."ID"`,
+    [requestId, request.PROCESS_ID]
+  );
+
+  const sourceBySapField = new Map();
+  const destValueByFieldId = new Map();
+
+  for (const row of values || []) {
+    const fieldCode = String(row.FIELD_CODE || '').trim();
+    const sapField = String(row.SAP_FIELD || '').trim();
+    const value = row.VALUE;
+    if (!sapField) continue;
+
+    if (fieldCode.startsWith('KNA1.') && isNonEmpty(value) && !sourceBySapField.has(sapField)) {
+      sourceBySapField.set(sapField, String(value));
+    }
+    if (fieldCode.startsWith('BUT000-KNA1.') && !destValueByFieldId.has(row.FIELD_ID)) {
+      destValueByFieldId.set(row.FIELD_ID, {
+        valueId: row.VALUE_ID || null,
+        lineNo: Number(row.LINE_NO || 1),
+        value: isNonEmpty(value) ? String(value) : ''
+      });
+    }
+  }
+
+  let changed = 0;
+  const ts = now();
+  for (const dest of readonlyDestScoped) {
+    const sourceValue = sourceBySapField.get(dest.sapField);
+    if (!isNonEmpty(sourceValue)) continue;
+
+    const currentDest = destValueByFieldId.get(dest.fieldId);
+    if (currentDest && isNonEmpty(currentDest.value)) continue;
+
+    if (currentDest?.valueId) {
+      await tx.run(
+        `UPDATE "MDG_REQUEST_FIELD_VALUE"
+            SET "VALUE" = ?, "MODIFIEDAT" = ?, "MODIFIEDBY" = ?
+          WHERE "ID" = ?`,
+        [sourceValue, ts, userId, currentDest.valueId]
+      );
+    } else {
+      await tx.run(
+        `INSERT INTO "MDG_REQUEST_FIELD_VALUE"
+         ("ID", "REQUEST_ID", "FIELD_ID", "LINE_NO", "VALUE", "MODIFIEDAT", "MODIFIEDBY")
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuid(), requestId, dest.fieldId, 1, sourceValue, ts, userId]
+      );
+    }
+
+    await insertRequestFieldChangeLog(tx, {
+      requestId,
+      fieldId: dest.fieldId,
+      fieldCode: dest.fieldCode,
+      lineNo: currentDest?.lineNo || 1,
+      oldValue: currentDest?.value || null,
+      newValue: sourceValue,
+      changeType: currentDest?.valueId ? 'UPDATE' : 'CREATE',
+      changedBy: userId,
+      changedRole: ROLE_CODES.REQUESTER,
+      source: 'PREFILL_CUSTOMER'
+    });
+    changed += 1;
+  }
+  return changed;
 }
 
 async function applyDefaultsToRequest(tx, requestId, processId, countryCode, processRoleId, userId = 'system') {
@@ -125,6 +328,7 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
   const scopedDefaults = await tx.run(
     `SELECT DISTINCT
         fc."ID"          AS "FIELD_ID",
+        fc."DATA_TYPE"   AS "DATA_TYPE",
         fcb."DEFAULT_BASE" AS "DEFAULT_BASE"
        FROM "MDG_PROCESS_BLOCK" pb
        JOIN "MDG_BLOCK_FIELD" bf
@@ -166,7 +370,7 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
   for (const row of scopedDefaults) {
     if (existingFieldIds.has(row.FIELD_ID)) continue;
 
-    const resolved = resolveDefaultValue(row.DEFAULT_BASE);
+    const resolved = resolveDefaultValue(row.DEFAULT_BASE, row.DATA_TYPE);
     if (resolved === null || resolved === '') continue;
 
     await tx.run(
@@ -465,6 +669,9 @@ async function onDeleteRequest(req) {
 async function beforeUpsertRequestValue(req) {
   const tx = cds.tx(req);
   const userId = currentUserId(req);
+  if (Object.prototype.hasOwnProperty.call(req.data || {}, 'VALUE')) {
+    req.data.VALUE = normalizeRequestValueInput(req.data.VALUE);
+  }
   const event = req.event;
 
   let requestId = req.data.REQUEST_ID;
@@ -575,6 +782,17 @@ async function afterUpsertRequestValue(_, req) {
     changedRole: audit.roleCode || null,
     source: req.event === 'CREATE' ? 'REQUEST_VALUE_CREATE' : 'REQUEST_VALUE_UPDATE'
   });
+
+  const triggerFieldCode = String(audit.fieldCode || '').trim().toUpperCase();
+  const shouldSyncDestFact = triggerFieldCode.startsWith('KNA1.')
+    || triggerFieldCode.startsWith('BUT000-KNA1.')
+    || triggerFieldCode === 'MDG_CTRL.CREATE_DESTFACT';
+  if (shouldSyncDestFact) {
+    await syncDestFactReadonlyFromKna1(tx, {
+      requestId: audit.requestId,
+      userId
+    });
+  }
 }
 
 async function onDeleteRequestValue(req) {

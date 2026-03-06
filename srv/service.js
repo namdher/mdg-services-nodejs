@@ -67,6 +67,8 @@ module.exports = cds.service.impl(async function () {
   this.before('READ', 'RequestValues', readAccess.beforeReadRequestValues);
   this.before('READ', 'RequestComments', readAccess.beforeReadRequestComments);
   this.before('READ', 'RequestFieldChangeLogs', readAccess.beforeReadRequestFieldChangeLogs);
+  this.before('READ', 'RequestActions', readAccess.beforeReadRequestActions);
+  this.before('READ', 'RequestSapMessages', readAccess.beforeReadRequestSapMessages);
   this.after('READ', 'RequestFieldChangeLogs', changeLogEnrichment.afterReadRequestFieldChangeLogs);
 
   this.on('whoAmI', auth.whoAmI);
