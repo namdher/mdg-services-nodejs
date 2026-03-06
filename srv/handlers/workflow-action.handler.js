@@ -81,10 +81,6 @@ const SAP_PROPERTY_ALIASES = Object.freeze({
   CONDUCTORESGENERALSET: Object.freeze({
     fityp: 'Zzfityp',
     zzfityp: 'Zzfityp'
-  }),
-  DESTMERCADERIAGENERALSET: Object.freeze({
-    fityp: 'Zzfityp',
-    zzfityp: 'Zzfityp'
   })
 });
 
@@ -233,10 +229,265 @@ async function _resolveSapTargetsForProcess(tx, { processId, operation = 'POST' 
   }
 }
 
+async function _resolveSapTargetsForProcessAnyState(tx, { processId, operation = 'POST' }) {
+  try {
+    const rows = await tx.run(
+      `SELECT "ID", "TARGET_CODE", "DESTINATION_NAME", "SERVICE_PATH", "ENTITYSET", "OPERATION", "IS_ENABLED"
+         FROM "MDG_SAP_TARGET"
+        WHERE "PROCESS_ID" = ?
+          AND UPPER(COALESCE("OPERATION", 'POST')) = UPPER(?)
+        ORDER BY "ID"`,
+      [processId, operation]
+    );
+    return (rows || []).map((r) => ({
+      id: r.ID,
+      targetCode: r.TARGET_CODE,
+      destinationName: r.DESTINATION_NAME,
+      servicePath: r.SERVICE_PATH,
+      entitySet: r.ENTITYSET,
+      operation: r.OPERATION,
+      isEnabled: Boolean(r.IS_ENABLED)
+    }));
+  } catch (err) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (msg.includes('mdg_sap_target') && (msg.includes('invalid table') || msg.includes('not found') || msg.includes('does not exist'))) {
+      return [];
+    }
+    throw err;
+  }
+}
+
 function _pickSapTargetByEntitySet(targets, entitySet) {
   const wanted = String(entitySet || '').trim().toUpperCase();
   if (!wanted) return null;
   return (targets || []).find((t) => String(t?.entitySet || '').trim().toUpperCase() === wanted) || null;
+}
+
+function _classifyCustomerCreationTarget(target) {
+  const entitySet = String(target?.entitySet || '').trim().toUpperCase();
+  const targetCode = String(target?.targetCode || '').trim().toUpperCase();
+  const id = String(target?.id || '');
+  const token = `${targetCode} ${entitySet}`;
+
+  const isCustomerMain = entitySet === 'CLIENTESGENERALSET'
+    || (token.includes('CLIENT') && (token.includes('GENERAL') || token.includes('CREATION')));
+  if (isCustomerMain) {
+    return { stepType: 'CUSTOMER_MAIN', order: 10, label: 'Cliente' };
+  }
+
+  const isDestMercMain = entitySet === 'DESTMERCADERIAGENERALSET'
+    || ((token.includes('DESTMERC') || token.includes('DESTMERCADERIA')) && (token.includes('GENERAL') || token.includes('CREATION')));
+  if (isDestMercMain) {
+    return { stepType: 'DESTMERC_MAIN', order: 20, label: 'Destinatario mercadería' };
+  }
+
+  const isSales = entitySet.includes('COMERCIAL') || token.includes('SALES') || token.includes('ORG');
+  if (isSales) {
+    return { stepType: 'FOLLOW_UP', order: 40, label: entitySet || targetCode || id };
+  }
+
+  return { stepType: 'FOLLOW_UP', order: 60, label: entitySet || targetCode || id };
+}
+
+async function _loadSapTargetFieldMeta(tx, { processId, sapTargetId }) {
+  if (!processId || !sapTargetId) return [];
+  const rows = await tx.run(
+    `SELECT DISTINCT
+        pm."FIELD_ID" AS "FIELD_ID",
+        fc."FIELD_CODE" AS "FIELD_CODE",
+        fc."SAP_FIELD" AS "SAP_FIELD",
+        fc."DATA_TYPE" AS "DATA_TYPE"
+       FROM "MDG_SAP_PAYLOAD_MAP" pm
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = pm."FIELD_ID"
+      WHERE pm."PROCESS_ID" = ?
+        AND pm."SAP_TARGET_ID" = ?`,
+    [processId, sapTargetId]
+  );
+  return (rows || []).filter((r) => r.FIELD_ID);
+}
+
+async function _resolveRequesterDefaultsByFieldId(tx, { processId, countryCode, fieldIds }) {
+  const scopedFieldIds = Array.from(new Set((fieldIds || []).map((x) => String(x || '').trim()).filter(Boolean)));
+  if (!processId || !scopedFieldIds.length) return new Map();
+
+  const roleRows = await tx.run(
+    `SELECT "ID"
+       FROM "MDG_PROCESS_ROLE"
+      WHERE "PROCESS_ID" = ?
+        AND "ROLE_CODE" = 'REQUESTER'
+        AND "IS_ENABLED" = true
+      ORDER BY "ID"
+      LIMIT 1`,
+    [processId]
+  );
+  const requesterRoleId = roleRows?.[0]?.ID || null;
+  if (!requesterRoleId) return new Map();
+
+  const inClause = scopedFieldIds.map(() => '?').join(',');
+  const rows = await tx.run(
+    `SELECT
+        fc."ID" AS "FIELD_ID",
+        COALESCE(NULLIF(TRIM(fcc."DEFAULT_OVERRIDE"), ''), NULLIF(TRIM(fcb."DEFAULT_BASE"), '')) AS "DEFAULT_VALUE"
+       FROM "MDG_FIELD_CATALOG" fc
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = ?
+        AND fcb."FIELD_ID" = fc."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = ?
+        AND fcc."FIELD_ID" = fc."ID"
+        AND fcc."COUNTRY_CODE" = ?
+      WHERE fc."ID" IN (${inClause})`,
+    [requesterRoleId, requesterRoleId, countryCode, ...scopedFieldIds]
+  );
+
+  const out = new Map();
+  for (const row of rows || []) {
+    const v = String(row.DEFAULT_VALUE || '').trim();
+    if (v) out.set(String(row.FIELD_ID), v);
+  }
+  return out;
+}
+
+function _isAddressSapField(sapField) {
+  const norm = _normalizePropertyName(sapField);
+  const addressFields = new Set([
+    _normalizePropertyName('Street'),
+    _normalizePropertyName('HouseNum1'),
+    _normalizePropertyName('City1'),
+    _normalizePropertyName('City2'),
+    _normalizePropertyName('PostCode1'),
+    _normalizePropertyName('Region'),
+    _normalizePropertyName('Country'),
+    _normalizePropertyName('TimeZone'),
+    _normalizePropertyName('Lzone'),
+    _normalizePropertyName('LanguCorr')
+  ]);
+  return addressFields.has(norm);
+}
+
+async function _applyCustomerToDestMercMirror(tx, {
+  requestId,
+  processId,
+  countryCode,
+  entitySet,
+  targetFieldMeta,
+  payload
+}) {
+  if (!payload || typeof payload !== 'object') return { payload, mirrored: [] };
+  const targetRows = Array.isArray(targetFieldMeta) ? targetFieldMeta : [];
+  if (!targetRows.length) return { payload, mirrored: [] };
+
+  const values = await tx.run(
+    `SELECT
+        c."FIELD_CODE" AS "FIELD_CODE",
+        c."SAP_FIELD" AS "SAP_FIELD",
+        c."DATA_TYPE" AS "DATA_TYPE",
+        v."VALUE" AS "VALUE",
+        v."LINE_NO" AS "LINE_NO"
+       FROM "MDG_FIELD_CATALOG" c
+       LEFT JOIN "MDG_REQUEST_FIELD_VALUE" v
+         ON v."FIELD_ID" = c."ID"
+        AND v."REQUEST_ID" = ?
+      WHERE c."FIELD_CODE" LIKE 'KNA1.%'
+         OR c."FIELD_CODE" LIKE 'BUT000-KNA1.%'
+      ORDER BY
+        c."FIELD_CODE",
+        CASE WHEN v."LINE_NO" = 1 THEN 0 ELSE 1 END,
+        v."LINE_NO",
+        v."ID"`,
+    [requestId]
+  );
+
+  const sourceBySapField = new Map();
+  const destExplicitBySapField = new Map();
+  for (const row of values || []) {
+    const fieldCode = String(row.FIELD_CODE || '').trim();
+    const sapField = String(row.SAP_FIELD || '').trim();
+    const value = row.VALUE;
+    if (!sapField || !_isNonEmpty(value)) continue;
+
+    if (fieldCode.startsWith('KNA1.') && !sourceBySapField.has(_normalizePropertyName(sapField))) {
+      sourceBySapField.set(_normalizePropertyName(sapField), {
+        value: String(value),
+        dataType: row.DATA_TYPE,
+        sourceFieldCode: fieldCode
+      });
+    }
+    if (!fieldCode.startsWith('KNA1.') && fieldCode.includes('.')) {
+      const key = _normalizePropertyName(sapField);
+      if (!destExplicitBySapField.has(key)) {
+        destExplicitBySapField.set(key, String(value));
+      }
+    }
+  }
+
+  const defaultsByFieldId = await _resolveRequesterDefaultsByFieldId(tx, {
+    processId,
+    countryCode,
+    fieldIds: targetRows.map((r) => r.FIELD_ID)
+  });
+
+  const schema = getEntitySetSchema(entitySet);
+  const props = schema?.properties || {};
+  const canonicalByNorm = new Map();
+  for (const [propName, propType] of Object.entries(props)) {
+    canonicalByNorm.set(_normalizePropertyName(propName), { propName, propType });
+  }
+
+  const mirrored = [];
+  for (const row of targetRows) {
+    const sapField = String(row.SAP_FIELD || '').trim();
+    if (!sapField) continue;
+    const norm = _normalizePropertyName(sapField);
+    const canonical = canonicalByNorm.get(norm);
+    if (!canonical?.propName) continue;
+    if (_isNonEmpty(payload[canonical.propName])) continue; // explicit payload wins
+    if (_isNonEmpty(destExplicitBySapField.get(norm))) continue; // explicit destination value wins
+
+    if (_isAddressSapField(sapField)) continue; // never mirror address automatically
+
+    // Explicit rule: destination BU_GROUP must keep configured default (e.g. Z009), not copied from customer.
+    if (norm === _normalizePropertyName('BU_GROUP')) {
+      const cfgDefault = String(defaultsByFieldId.get(String(row.FIELD_ID)) || '').trim();
+      const fallbackDefault = 'Z009';
+      const chosen = cfgDefault || fallbackDefault;
+      if (!_isNonEmpty(chosen)) continue;
+      const conversion = convertValueForSap(chosen, {
+        edmType: canonical.propType,
+        fallbackDataType: row.DATA_TYPE
+      });
+      if (!conversion.ok) continue;
+      payload[canonical.propName] = conversion.value;
+      mirrored.push({
+        sourceFieldCode: 'DEFAULT_BASE',
+        targetFieldCode: String(row.FIELD_CODE || '').trim(),
+        sapField
+      });
+      continue;
+    }
+
+    const source = sourceBySapField.get(norm);
+    if (!source || !_isNonEmpty(source.value)) continue;
+
+    // Explicit rule: destination RUT/SORTL follows customer value.
+    if (norm !== _normalizePropertyName('SORTL') && !_isNonEmpty(source.value)) continue;
+
+    const conversion = convertValueForSap(source.value, {
+      edmType: canonical.propType,
+      fallbackDataType: source.dataType || row.DATA_TYPE
+    });
+    if (!conversion.ok) continue;
+
+    payload[canonical.propName] = conversion.value;
+    mirrored.push({
+      sourceFieldCode: source.sourceFieldCode,
+      targetFieldCode: String(row.FIELD_CODE || '').trim(),
+      sapField
+    });
+  }
+
+  return { payload, mirrored };
 }
 
 function _parseBooleanLike(value) {
@@ -1162,74 +1413,72 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     }
 
     if (processCode === 'CUSTOMER_CREATION') {
-      const controls = await _readCustomerCreationControls(tx, requestId);
-      if (controls.EXTEND_DESTFACT_SALES && !controls.CREATE_DESTFACT) {
-        req.reject(400, _t(req, 'invalidDestfactFlags'));
+      const requesterRoleId = await _resolveRequesterRoleId(tx, processId);
+      const allTargets = await _resolveSapTargetsForProcessAnyState(tx, { processId, operation: 'POST' });
+      const enabledTargets = (allTargets || []).filter((t) => t.isEnabled);
+      if (!enabledTargets.length) {
+        req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
       }
 
-      const requesterRoleId = await _resolveRequesterRoleId(tx, processId);
-      const blockMap = await _loadProcessBlockFieldMap(tx, processId, [
-        'CUST_GEN',
-        'CUST_ADDR',
-        'CUST_DESTFACT_GEN',
-        'CUST_DESTFACT_SALES'
-      ]);
-      const customerFieldIds = _mergeFieldIds(
-        blockMap.get('CUST_GEN') || [],
-        blockMap.get('CUST_ADDR') || []
-      );
-      const destFactGenFieldIds = _mergeFieldIds(blockMap.get('CUST_DESTFACT_GEN') || []);
-      const destFactSalesFieldIds = _mergeFieldIds(blockMap.get('CUST_DESTFACT_SALES') || []);
+      const classified = enabledTargets.map((t) => ({ ...t, ..._classifyCustomerCreationTarget(t) }));
+      const customerMain = classified.find((t) => t.stepType === 'CUSTOMER_MAIN');
+      const destMercMain = classified.find((t) => t.stepType === 'DESTMERC_MAIN');
+      if (!customerMain) {
+        req.reject(422, _t(req, 'noSapTargetForEntitySet', { processCode: processCode || 'UNKNOWN', entitySet: 'CUSTOMER_MAIN' }));
+      }
+      if (!destMercMain) {
+        req.reject(422, _t(req, 'noSapTargetForEntitySet', { processCode: processCode || 'UNKNOWN', entitySet: 'DESTMERC_MAIN' }));
+      }
 
-      const stepDefs = [
-        {
-          key: 'CLIENTE',
-          entitySet: 'ClientesGeneralSet',
-          enabled: true,
-          successMessage: 'Se creó Cliente {id}',
-          fieldIds: customerFieldIds
-        },
-        {
-          key: 'DESTFACT_GENERAL',
-          entitySet: 'DestFacturaGeneralSet',
-          enabled: controls.CREATE_DESTFACT,
-          successMessage: 'Se creó Destinatario Facturación {id}',
-          fieldIds: destFactGenFieldIds
-        },
-        {
-          key: 'DESTFACT_VENTAS',
-          entitySet: 'DestFacturaComercialSet',
-          enabled: controls.EXTEND_DESTFACT_SALES,
-          successMessage: 'Se amplió Org. Venta Destinatario {id}',
-          fieldIds: destFactSalesFieldIds
-        }
-      ].filter((s) => s.enabled);
+      const orderedSteps = [
+        customerMain,
+        destMercMain,
+        ...classified.filter((t) => t.id !== customerMain.id && t.id !== destMercMain.id)
+          .sort((a, b) => {
+            if (a.order !== b.order) return a.order - b.order;
+            return String(a.entitySet || '').localeCompare(String(b.entitySet || ''));
+          })
+      ];
+
+      const disabledTargets = (allTargets || []).filter((t) => !t.isEnabled);
+      for (const target of disabledTargets) {
+        await insertComment(tx, {
+          requestId,
+          authorUser: userId,
+          authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
+          message: `Paso ${target.entitySet || target.targetCode || target.id} omitido por configuración deshabilitada`
+        });
+      }
 
       const stepResults = [];
       let customerId = String(request?.SUBJECT_ID || '').trim() || null;
-      let destFactId = null;
-      for (let i = 0; i < stepDefs.length; i++) {
-        const step = stepDefs[i];
+      let destMercId = null;
+
+      for (const step of orderedSteps) {
+        const stepKey = step.stepType === 'CUSTOMER_MAIN'
+          ? 'CLIENTE'
+          : (step.stepType === 'DESTMERC_MAIN' ? 'DESTMERC_GENERAL' : `FOLLOWUP_${step.entitySet}`);
+        const entitySet = String(step.entitySet || '').trim();
+
         const alreadyOk = await _readLatestSuccessfulStep(tx, {
           requestId,
           processId,
-          entitySet: step.entitySet
+          entitySet
         });
         if (alreadyOk) {
-          if (step.entitySet === 'ClientesGeneralSet' && !customerId) {
-            customerId = String(alreadyOk.SAP_OBJECT_KEY || '').trim() || customerId;
-            if (customerId) {
-              await _upsertRequestSubject(tx, {
-                requestId,
-                subjectId: customerId,
-                subjectType: 'CUSTOMER',
-                userId,
-                source: 'WORKFLOW_APPROVE_RESUME'
-              });
-            }
+          const resumedId = String(alreadyOk.SAP_OBJECT_KEY || '').trim() || null;
+          if (step.stepType === 'CUSTOMER_MAIN' && resumedId && !customerId) {
+            customerId = resumedId;
+            await _upsertRequestSubject(tx, {
+              requestId,
+              subjectId: customerId,
+              subjectType: 'CUSTOMER',
+              userId,
+              source: 'WORKFLOW_APPROVE_RESUME'
+            });
           }
-          if (step.entitySet === 'DestFacturaGeneralSet') {
-            destFactId = String(alreadyOk.SAP_OBJECT_KEY || '').trim() || destFactId;
+          if (step.stepType === 'DESTMERC_MAIN' && resumedId) {
+            destMercId = resumedId;
           }
           stepResults.push({
             step,
@@ -1237,11 +1486,11 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
               ok: true,
               requestId,
               processCode,
-              entitySet: step.entitySet,
+              entitySet,
               httpStatus: Number(alreadyOk.HTTP_STATUS || 200),
               finalStatus: STATUS_COMPLETED,
               skippedFields: [],
-              sapObjectKey: String(alreadyOk.SAP_OBJECT_KEY || '').trim() || null,
+              sapObjectKey: resumedId,
               resumed: true
             }
           });
@@ -1251,30 +1500,31 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
             actorUser: userId,
             actorRole: ROLE_CODES.APPROVER,
             comment: _stringifySafe({
-              step: step.key,
-              entitySet: step.entitySet,
+              step: stepKey,
+              entitySet,
               reason: 'already_completed'
             })
           });
           continue;
         }
 
-        const sapTarget = _pickSapTargetByEntitySet(sapTargets, step.entitySet);
-        if (!sapTarget?.entitySet || !sapTarget?.destinationName || !sapTarget?.servicePath) {
-          req.reject(422, _t(req, 'noSapTargetForEntitySet', { processCode: processCode || 'UNKNOWN', entitySet: step.entitySet }));
-        }
+        const targetFieldMeta = await _loadSapTargetFieldMeta(tx, {
+          processId,
+          sapTargetId: step.id
+        });
+        const allowedFieldIds = targetFieldMeta.map((r) => String(r.FIELD_ID || '').trim()).filter(Boolean);
 
         const { payload, skippedFields } = await _buildSapPayload(
           tx,
           requestId,
-          step.entitySet,
+          entitySet,
           processId,
           {
-            allowedFieldIds: step.fieldIds || [],
+            allowedFieldIds,
             processRoleId: requesterRoleId,
             countryCode: request.COUNTRY_CODE,
             creationDateOverride: requestCreatedDate,
-            excludeSapFields: step.entitySet === 'ClientesGeneralSet' ? ['Zzfechac'] : []
+            excludeSapFields: entitySet === 'ClientesGeneralSet' ? ['Zzfechac'] : []
           }
         );
 
@@ -1283,77 +1533,89 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
             requestId,
             processRoleId: requesterRoleId,
             countryCode: request.COUNTRY_CODE,
-            fieldIds: step.fieldIds || [],
-            entitySet: step.entitySet,
+            fieldIds: allowedFieldIds,
+            entitySet,
             payload
           });
         } catch (err) {
           if (err?.code === 'MANDATORY_FIELDS_MISSING_STEP') {
             req.reject(400, _t(req, 'mandatoryFieldsMissingForStep', {
-              entitySet: step.entitySet,
+              entitySet,
               fields: (err.details || []).join(', ')
             }));
           }
           throw err;
         }
 
-        let backfilled = [];
-        if (step.entitySet === 'DestFacturaGeneralSet') {
-          const patched = await _applyDestFactGeneralReadonlyBackfill(tx, {
+        let mirrored = [];
+        if (step.stepType === 'DESTMERC_MAIN') {
+          const mirroredResult = await _applyCustomerToDestMercMirror(tx, {
             requestId,
             processId,
             countryCode: request.COUNTRY_CODE,
-            entitySet: step.entitySet,
+            entitySet,
+            targetFieldMeta,
             payload
           });
-          backfilled = patched.backfilled || [];
+          mirrored = mirroredResult.mirrored || [];
         }
-        const stepCustomerId = step.entitySet === 'DestFacturaComercialSet'
-          ? (String(destFactId || '').trim() || String(customerId || '').trim() || null)
-          : (String(customerId || '').trim() || null);
-        if (i > 0 && stepCustomerId) {
-          _setCustomerIdInPayloadFromSchema(step.entitySet, payload, stepCustomerId);
+
+        const idForChildSteps = String(destMercId || customerId || '').trim() || null;
+        if (step.stepType !== 'CUSTOMER_MAIN' && idForChildSteps) {
+          _setCustomerIdInPayloadFromSchema(entitySet, payload, idForChildSteps);
         }
 
         const result = await _postToS4AndPersist(tx, {
           requestId,
           processId,
           processCode,
-          sapTarget,
+          sapTarget: step,
           payload,
           userId,
           previousStatus: status,
           skippedFields,
           updateRequestState: false,
           emitErrorBusinessComment: false,
-          updateSubjectFromSap: i === 0
+          updateSubjectFromSap: step.stepType === 'CUSTOMER_MAIN'
         });
 
-        const payloadSummary = _summarizePayload(payload);
         await insertActionLog(tx, {
           requestId,
           action: result.ok ? 'SAP_STEP_OK' : 'SAP_STEP_ERROR',
           actorUser: userId,
           actorRole: ROLE_CODES.APPROVER,
           comment: _stringifySafe({
-            step: step.key,
-            entitySet: step.entitySet,
+            step: stepKey,
+            entitySet,
             ok: result.ok,
             httpStatus: result.httpStatus,
             sapObjectKey: result.sapObjectKey || null,
-            payload: payloadSummary,
-            backfilled
+            payload: _summarizePayload(payload),
+            mirrored
           })
         });
 
         if (result.ok) {
-          const businessId = _chooseIdForBusinessComment(result, customerId);
-          const msg = step.successMessage.replace('{id}', businessId || '(sin id)');
+          const stepId = String(result.sapObjectKey || '').trim() || null;
+          if (step.stepType === 'CUSTOMER_MAIN') {
+            customerId = stepId || customerId;
+          } else if (step.stepType === 'DESTMERC_MAIN') {
+            destMercId = stepId || destMercId;
+          }
+
+          let message = null;
+          if (step.stepType === 'CUSTOMER_MAIN') {
+            message = `Cliente creado: ${stepId || '(sin id)'}`;
+          } else if (step.stepType === 'DESTMERC_MAIN') {
+            message = `Destinatario mercadería creado: ${stepId || '(sin id)'}`;
+          } else {
+            message = `Paso ${entitySet} ejecutado correctamente${stepId ? ` (ID: ${stepId})` : ''}.`;
+          }
           await insertComment(tx, {
             requestId,
             authorUser: userId,
             authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
-            message: msg
+            message
           });
         } else {
           const sapErrorMessage = result?.sapErrorMessage || 'SAP integration error';
@@ -1366,12 +1628,6 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         }
 
         stepResults.push({ step, result });
-        if (i === 0 && result.ok) {
-          customerId = String(result.sapObjectKey || '').trim() || customerId;
-        }
-        if (step.entitySet === 'DestFacturaGeneralSet' && result.ok) {
-          destFactId = String(result.sapObjectKey || '').trim() || destFactId;
-        }
         if (!result.ok) break;
       }
 
@@ -1400,15 +1656,16 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         });
       }
 
+      const lastStep = stepResults[stepResults.length - 1]?.result || null;
       approveResult = {
         ok: !failed,
         requestId,
         processCode,
-        entitySet: stepResults.map((s) => s.step.entitySet).join(','),
-        httpStatus: failed ? failed.result.httpStatus : (stepResults[stepResults.length - 1]?.result?.httpStatus || 200),
+        entitySet: orderedSteps.map((s) => s.entitySet).join(','),
+        httpStatus: failed ? failed.result.httpStatus : (lastStep?.httpStatus || 200),
         finalStatus,
         skippedFields: anySkipped,
-        sapObjectKey: customerId
+        sapObjectKey: String(destMercId || customerId || '').trim() || null
       };
     } else if (processCode === 'TRANSPORT_DRIVER_CREATION') {
       const requesterRoleId = await _resolveRequesterRoleId(tx, processId);

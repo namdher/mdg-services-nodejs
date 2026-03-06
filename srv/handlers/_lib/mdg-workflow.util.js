@@ -151,11 +151,22 @@ async function getEffectiveFieldControl(tx, { processRoleId, countryCode, fieldI
 }
 
 async function validateMandatoryFieldsOnSubmit(tx, { requestId, processId, processRoleId, countryCode }) {
+  const processRows = await tx.run(
+    `SELECT "PROCESS_CODE"
+       FROM "MDG_PROCESS"
+      WHERE "ID" = ?`,
+    [processId]
+  );
+  const processCode = String(processRows?.[0]?.PROCESS_CODE || '').trim().toUpperCase();
+
   const mandatoryRows = await tx.run(
     `SELECT DISTINCT
         fc."ID"         AS "FIELD_ID",
-        fc."FIELD_CODE" AS "FIELD_CODE"
+        fc."FIELD_CODE" AS "FIELD_CODE",
+        ob."BLOCK_CODE" AS "BLOCK_CODE"
        FROM "MDG_PROCESS_BLOCK" pb
+       JOIN "MDG_OBJECT_BLOCK" ob
+         ON ob."ID" = pb."BLOCK_ID"
        JOIN "MDG_BLOCK_FIELD" bf
          ON bf."BLOCK_ID" = pb."BLOCK_ID"
        JOIN "MDG_FIELD_CATALOG" fc
@@ -174,7 +185,90 @@ async function validateMandatoryFieldsOnSubmit(tx, { requestId, processId, proce
 
   if (!mandatoryRows.length) return;
 
-  const fieldIds = mandatoryRows.map((r) => r.FIELD_ID);
+  let scopedMandatoryRows = mandatoryRows;
+
+  // Optional subflows in CUSTOMER_CREATION are controlled by request flags.
+  if (processCode === 'CUSTOMER_CREATION') {
+    const flagRows = await tx.run(
+      `SELECT c."FIELD_CODE" AS "FIELD_CODE", v."VALUE" AS "VALUE"
+         FROM "MDG_REQUEST_FIELD_VALUE" v
+         JOIN "MDG_FIELD_CATALOG" c ON c."ID" = v."FIELD_ID"
+        WHERE v."REQUEST_ID" = ?
+          AND v."LINE_NO" = 1
+          AND c."FIELD_CODE" IN ('MDG_CTRL.CREATE_DESTFACT', 'MDG_CTRL.EXTEND_DESTFACT_SALES')`,
+      [requestId]
+    );
+    const flagByCode = new Map(
+      (flagRows || []).map((r) => [
+        String(r.FIELD_CODE || '').trim().toUpperCase(),
+        String(r.VALUE || '').trim().toLowerCase()
+      ])
+    );
+    const isTruthy = (v) => ['true', '1', 'x', 'y', 'yes', 'si', 'sí'].includes(v || '');
+    const createDestFact = isTruthy(flagByCode.get('MDG_CTRL.CREATE_DESTFACT'));
+    const extendDestFactSales = isTruthy(flagByCode.get('MDG_CTRL.EXTEND_DESTFACT_SALES'));
+
+    scopedMandatoryRows = scopedMandatoryRows.filter((row) => {
+      const blockCode = String(row.BLOCK_CODE || '').trim().toUpperCase();
+      if (blockCode === 'CUST_DESTFACT_GEN') return createDestFact;
+      if (blockCode === 'CUST_DESTFACT_SALES') return createDestFact && extendDestFactSales;
+      return true;
+    });
+  }
+
+  if (!scopedMandatoryRows.length) return;
+
+  const targetRows = await tx.run(
+    `SELECT "ID", "IS_ENABLED"
+       FROM "MDG_SAP_TARGET"
+      WHERE "PROCESS_ID" = ?
+        AND UPPER(COALESCE("OPERATION", 'POST')) = 'POST'`,
+    [processId]
+  );
+  const hasAnyTarget = (targetRows || []).length > 0;
+  if (hasAnyTarget && scopedMandatoryRows.length) {
+    const enabledTargetIds = new Set(
+      (targetRows || [])
+        .filter((r) => !!r.IS_ENABLED)
+        .map((r) => String(r.ID || '').trim())
+        .filter(Boolean)
+    );
+    const fieldIds = scopedMandatoryRows.map((r) => String(r.FIELD_ID || '').trim()).filter(Boolean);
+    if (fieldIds.length) {
+      const inClause = fieldIds.map(() => '?').join(',');
+      const mapRows = await tx.run(
+        `SELECT DISTINCT "FIELD_ID", "SAP_TARGET_ID"
+           FROM "MDG_SAP_PAYLOAD_MAP"
+          WHERE "PROCESS_ID" = ?
+            AND "FIELD_ID" IN (${inClause})`,
+        [processId, ...fieldIds]
+      );
+      const mappedByField = new Map();
+      for (const row of mapRows || []) {
+        const fieldId = String(row.FIELD_ID || '').trim();
+        const targetId = String(row.SAP_TARGET_ID || '').trim();
+        if (!fieldId || !targetId) continue;
+        if (!mappedByField.has(fieldId)) mappedByField.set(fieldId, new Set());
+        mappedByField.get(fieldId).add(targetId);
+      }
+
+      scopedMandatoryRows = scopedMandatoryRows.filter((row) => {
+        const fieldId = String(row.FIELD_ID || '').trim();
+        const mappedTargets = mappedByField.get(fieldId);
+        // If field is not mapped to SAP payload, keep legacy behavior and validate it.
+        if (!mappedTargets || mappedTargets.size === 0) return true;
+        // Validate only if field participates in at least one enabled target.
+        for (const targetId of mappedTargets) {
+          if (enabledTargetIds.has(targetId)) return true;
+        }
+        return false;
+      });
+    }
+  }
+
+  if (!scopedMandatoryRows.length) return;
+
+  const fieldIds = scopedMandatoryRows.map((r) => r.FIELD_ID);
   const inClause = fieldIds.map(() => '?').join(',');
 
   const values = await tx.run(
@@ -189,7 +283,7 @@ async function validateMandatoryFieldsOnSubmit(tx, { requestId, processId, proce
   );
 
   const hasValue = new Set(values.filter((v) => Number(v.HAS_VALUE) === 1).map((v) => v.FIELD_ID));
-  const missing = mandatoryRows.filter((f) => !hasValue.has(f.FIELD_ID));
+  const missing = scopedMandatoryRows.filter((f) => !hasValue.has(f.FIELD_ID));
 
   if (missing.length > 0) {
     const missingCodes = missing.map((m) => m.FIELD_CODE).join(', ');
