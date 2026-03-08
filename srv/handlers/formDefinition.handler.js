@@ -138,6 +138,46 @@ async function _readFormFields(tx, { processId, processRoleId, countryCode }) {
   return tx.run(sql, [processRoleId, processRoleId, countryCode, processId])
 }
 
+async function _readVhDependenciesByFieldCodes(tx, fieldCodes) {
+  const aFieldCodes = Array.from(new Set((fieldCodes || []).map((x) => String(x || '').trim()).filter(Boolean)))
+  if (!aFieldCodes.length) return {}
+
+  const placeholders = aFieldCodes.map(() => '?').join(',')
+
+  try {
+    const rows = await tx.run(
+      `SELECT
+          "FIELD_CODE",
+          "DEPENDS_ON_FIELD_CODE",
+          "VH_PROPERTY_NAME",
+          "REQUIRED",
+          "EVALUATION_ORDER",
+          "IS_ACTIVE"
+         FROM "MDG_FIELD_VH_DEPENDENCY"
+        WHERE "IS_ACTIVE" = true
+          AND "FIELD_CODE" IN (${placeholders})
+        ORDER BY "FIELD_CODE" ASC, "EVALUATION_ORDER" ASC`,
+      aFieldCodes
+    )
+
+    return rows.reduce((acc, row) => {
+      const fieldCode = String(row.FIELD_CODE || '').trim()
+      if (!fieldCode) return acc
+      if (!acc[fieldCode]) acc[fieldCode] = []
+      acc[fieldCode].push({
+        parentFieldCode: String(row.DEPENDS_ON_FIELD_CODE || '').trim(),
+        vhPropertyName: String(row.VH_PROPERTY_NAME || '').trim(),
+        required: row.REQUIRED === true || String(row.REQUIRED).toLowerCase() === 'true' || row.REQUIRED === 1,
+        evaluationOrder: Number(row.EVALUATION_ORDER || 0)
+      })
+      return acc
+    }, {})
+  } catch (_) {
+    // Backward compatible path if dependency table is not available in a landscape.
+    return {}
+  }
+}
+
 async function getFormDefinition(req) {
   const { processCode, countryCode, roleCode } = req.data || {}
 
@@ -178,6 +218,10 @@ async function getFormDefinition(req) {
     processRoleId,
     countryCode
   })
+  const depsByFieldCode = await _readVhDependenciesByFieldCodes(
+    tx,
+    rows.map((r) => r.FIELD_CODE)
+  )
 
   // 5) Respuesta OData: DEVUELVE ARRAY (NO string JSON)
   return rows.map(r => ({
@@ -210,7 +254,8 @@ async function getFormDefinition(req) {
     vhEntitySet: r.VH_ENTITYSET,
     vhKeyField: r.VH_KEY_FIELD,
     vhTextField: r.VH_TEXT_FIELD,
-    vhSearchFields: r.VH_SEARCH_FIELDS
+    vhSearchFields: r.VH_SEARCH_FIELDS,
+    vhDependency: depsByFieldCode[String(r.FIELD_CODE || '').trim()] || []
   }))
 }
 

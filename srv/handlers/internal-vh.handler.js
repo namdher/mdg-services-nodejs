@@ -9,6 +9,10 @@ const DATA = {
     { CODE: '1', TEXT: 'Taxable' },
     { CODE: '2', TEXT: 'Reduced Tax' }
   ],
+  VH_Internal_Boolean: [
+    { CODE: 'true', TEXT: 'Sí' },
+    { CODE: 'false', TEXT: 'No' }
+  ],
   VH_Internal_TATYP: [
     { CODE: 'J1CA', TEXT: 'J1CA' },
     { CODE: 'J2CA', TEXT: 'J2CA' },
@@ -68,6 +72,11 @@ const DATA = {
     { CODE: 'ZCHE', TEXT: 'ZCHE' },
     { CODE: 'ZJUD', TEXT: 'ZJUD' }
   ],
+  VH_Internal_MABER: [
+    { CODE: 'A001', TEXT: 'Área de gestión A001' },
+    { CODE: 'A002', TEXT: 'Área de gestión A002' },
+    { CODE: 'A003', TEXT: 'Área de gestión A003' }
+  ],
   VH_Internal_MAHNS: [
     { CODE: '1', TEXT: '1' },
     { CODE: '2', TEXT: '2' }
@@ -91,6 +100,7 @@ function readStatic(name) {
 module.exports = {
   readVhBuGroup: readStatic('VH_BU_GROUP'),
   readVhInternalTaxkd: readStatic('VH_Internal_TAXKD'),
+  readVhInternalBoolean: readStatic('VH_Internal_Boolean'),
   readVhInternalTatyp: readStatic('VH_Internal_TATYP'),
   readVhInternalBuGroup: readStatic('VH_Internal_BU_GROUP'),
   readVhInternalKtokd: readStatic('VH_Internal_KTOKD'),
@@ -102,6 +112,7 @@ module.exports = {
   readVhInternalDefltComm: readStatic('VH_Internal_DEFLT_COMM'),
   readVhInternalZzbkvid: readStatic('VH_Internal_ZZBKVID'),
   readVhInternalMahna: readStatic('VH_Internal_MAHNA'),
+  readVhInternalMaber: readStatic('VH_Internal_MABER'),
   readVhInternalMahns: readStatic('VH_Internal_MAHNS'),
   readVhStatus: readStatic('VH_Status')
 };

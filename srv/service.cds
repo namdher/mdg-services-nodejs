@@ -125,6 +125,9 @@ service MDGService @(path:'/mdg') {
     key ID      : String(200);
     Spart       : String(2);
     SpartText   : String(80);
+    Division    : String(2);
+    Division_Text : String(80);
+    DivisionOID : String(40);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerSoc {
@@ -159,6 +162,7 @@ service MDGService @(path:'/mdg') {
     Banks     : String(3);
     Bankl     : String(15);
     Bankn     : String(18);
+    EbppAccname : String(120);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerImp {
@@ -166,6 +170,30 @@ service MDGService @(path:'/mdg') {
     Kunnr     : String(10);
     Aland     : String(3);
     Tatyp     : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerLzone {
+    key TransportZone               : String(10);
+    TransportZoneDescription        : String(120);
+    CountryCode                     : String(3);
+    TransportZone_Text              : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerRegion {
+    key Region                      : String(3);
+    Region_Text                     : String(120);
+    ProvincialTaxCode               : String(30);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerPaymentCondition {
+    key PaymentCondition            : String(4);
+    PaymentCondition_Text           : String(120);
+    PaymentTerms                    : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerBzirk {
+    key SalesDistrict               : String(6);
+    SalesDistrict_Text              : String(120);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerNif {
@@ -193,6 +221,11 @@ service MDGService @(path:'/mdg') {
     key ProductDistributionChnl      : String(2);
     ProductDistributionChnl_Text     : String(80);
     ProductSalesOrg                  : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_MaterialKtgrm {
+    key AcctAssignmentGroup           : String(4);
+    Description                       : String(120);
   }
 
   @cds.persistence.skip @readonly entity VH_DriverGen {
@@ -301,6 +334,11 @@ service MDGService @(path:'/mdg') {
     TEXT     : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_Internal_Boolean {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_Internal_TATYP {
     key CODE : String(40);
     TEXT     : String(120);
@@ -356,6 +394,11 @@ service MDGService @(path:'/mdg') {
     TEXT     : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_Internal_MABER {
+    key CODE : String(40);
+    TEXT     : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_Internal_MAHNS {
     key CODE : String(40);
     TEXT     : String(120);
@@ -384,6 +427,17 @@ service MDGService @(path:'/mdg') {
   action fetchS4Metadata(servicePath : String) returns LargeString;
   action whoAmI() returns LargeString;
   action getAvailableProcesses(countryCode : String(3), frontCode : String(30)) returns LargeString;
+  type RequestResultItem : {
+    stepCode      : String(80);
+    status        : String(20);
+    externalId    : String(80);
+    message       : String(400);
+    targetCode    : String(60);
+    entitySet     : String(120);
+    correlationId : String(100);
+    createdAt     : Timestamp;
+  };
+  function getRequestResults(requestId : UUID) returns array of RequestResultItem;
   type FormFieldRuntime : {
     processCode    : String(80);
     countryCode    : String(3);

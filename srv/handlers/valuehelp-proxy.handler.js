@@ -53,9 +53,45 @@ const VH_MAP = {
     fieldCode: 'MVKE.VTWEG',
     searchFields: ['ProductDistributionChnl', 'ProductDistributionChnl_Text', 'ProductSalesOrg']
   },
+  VH_MaterialKtgrm: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+    entitySet: 'Z_I_MatAccountAssignment_VH',
+    keyField: 'AcctAssignmentGroup',
+    fieldCode: 'MVKE.KTGRM',
+    searchFields: ['AcctAssignmentGroup', 'Description']
+  },
   VH_CustomerOrgV: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_SalesOrganization', syntheticKey: true, keyParts: ['Vkorg'], fieldCode: 'KNVV.VKORG' },
   VH_CustomerVtweg: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_DistributionChainCountry', syntheticKey: true, keyParts: ['Vkorg', 'Vtweg'], fieldCode: 'KNVV.VTWEG' },
   VH_CustomerSpart: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_Division', syntheticKey: true, keyParts: ['Spart'], fieldCode: 'KNVV.SPART' },
+  VH_CustomerLzone: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
+    entitySet: 'I_TransportationZoneDescVH',
+    keyField: 'TransportZone',
+    fieldCode: 'KNA1.LZONE',
+    searchFields: ['TransportZone', 'TransportZoneDescription', 'CountryCode', 'TransportZone_Text']
+  },
+  VH_CustomerRegion: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
+    entitySet: 'I_Region',
+    keyField: 'Region',
+    fieldCode: 'KNA1.REGION',
+    searchFields: ['Region', 'Region_Text', 'ProvincialTaxCode']
+  },
+  VH_CustomerPaymentCondition: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',
+    entitySet: 'I_PaymentCondition',
+    keyField: 'PaymentCondition',
+    fieldCode: 'KNVV.ZTERM',
+    searchFields: ['PaymentCondition', 'PaymentCondition_Text', 'PaymentTerms']
+  },
+  VH_CustomerBzirk: {
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',
+    entitySet: 'I_SalesDistrict',
+    entitySetCandidates: ['I_SalesDistrict', 'I_SalesDistrictVH'],
+    keyField: 'SalesDistrict',
+    fieldCode: 'KNVV.BZIRK',
+    searchFields: ['SalesDistrict', 'SalesDistrict_Text']
+  },
   VH_CustomerSoc:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_SOC_CDS',  entitySet: 'I_CompanyCode', syntheticKey: true, keyParts: ['Bukrs', 'Maber'] },
   VH_CustomerCom:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',  entitySet: 'ZCDS_CLIENTES_COM', syntheticKey: true, keyParts: ['Kunnr', 'Parnr'] },
   VH_CustomerEmp:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_EMP_CDS',  entitySet: 'zcds_clientes_emp', syntheticKey: true, keyParts: ['Kunnr', 'Bukrs', 'Ekorg', 'Vkorg'] },
@@ -193,6 +229,31 @@ function _escapeODataLiteral(value) {
   return String(value ?? '').replace(/'/g, "''");
 }
 
+function _isRemoteSegmentNotFoundError(err) {
+  const message = String(err?.message || err?.response?.data?.error?.message?.value || '').toLowerCase();
+  return message.includes('resource not found for the segment');
+}
+
+async function _s4GetWithEntityFallback(cfg, query) {
+  const candidates = Array.from(
+    new Set([cfg?.entitySet].concat(cfg?.entitySetCandidates || []).filter(Boolean))
+  );
+  let lastError;
+
+  for (const entitySet of candidates) {
+    try {
+      return await s4Get({ servicePath: cfg.servicePath, entitySet, query });
+    } catch (err) {
+      lastError = err;
+      if (!_isRemoteSegmentNotFoundError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('No valid entity set candidate configured for value help');
+}
+
 function _getContextInput(req, q) {
   const payloadContext = req?.data?.context;
   const queryContext =
@@ -215,6 +276,22 @@ function _getContextInput(req, q) {
   } catch (_) {
     return {};
   }
+}
+
+function _findContextValue(contextMap, key) {
+  if (!contextMap || !key) return null;
+  if (contextMap[key] !== undefined && contextMap[key] !== null) {
+    const exact = String(contextMap[key]).trim();
+    if (exact !== '') return exact;
+  }
+  const keyLower = String(key).toLowerCase();
+  for (const [ctxKey, ctxValue] of Object.entries(contextMap)) {
+    if (String(ctxKey).toLowerCase() !== keyLower) continue;
+    if (ctxValue === undefined || ctxValue === null) continue;
+    const normalized = String(ctxValue).trim();
+    if (normalized !== '') return normalized;
+  }
+  return null;
 }
 
 function _getRequestIdInput(req, q) {
@@ -247,6 +324,34 @@ function _getFieldCodeInput(req, q) {
     req?.req?.query?.FIELD_CODE ??
     ''
   ).trim();
+}
+
+function _extractFieldHintsFromQuery(q) {
+  const hints = new Set();
+  const selectParts = String(q?.$select || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  for (const part of selectParts) hints.add(part.toLowerCase());
+
+  const filter = String(q?.$filter || '');
+  const fieldRegex = /\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:eq|ne|gt|ge|lt|le)\b/g;
+  let m;
+  while ((m = fieldRegex.exec(filter)) !== null) {
+    if (m?.[1]) hints.add(String(m[1]).toLowerCase());
+  }
+  return hints;
+}
+
+function _resolveFieldCodeByQueryHints(fieldCodes, q) {
+  const hints = _extractFieldHintsFromQuery(q);
+  if (!hints.size) return '';
+  for (const fieldCode of fieldCodes || []) {
+    const suffix = String(fieldCode || '').split('.').pop();
+    if (!suffix) continue;
+    if (hints.has(String(suffix).toLowerCase())) return fieldCode;
+  }
+  return '';
 }
 
 async function _getVhFieldCodes(tx, vhName) {
@@ -305,29 +410,25 @@ async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
 
 async function _resolveDependencyValue(tx, req, q, dep, contextMap, requestId) {
   const depFieldCode = String(dep?.DEPENDS_ON_FIELD_CODE || '').trim();
-  if (!depFieldCode) return null;
+  if (!depFieldCode) return { value: null, source: null };
 
-  const fromContext = contextMap?.[depFieldCode];
-  if (fromContext !== undefined && fromContext !== null && String(fromContext).trim() !== '') {
-    return String(fromContext).trim();
-  }
+  const fromContext = _findContextValue(contextMap, depFieldCode);
+  if (fromContext) return { value: fromContext, source: 'context' };
 
   const depSimple = depFieldCode.split('.').pop();
-  const fromSimpleContext = contextMap?.[depSimple];
-  if (fromSimpleContext !== undefined && fromSimpleContext !== null && String(fromSimpleContext).trim() !== '') {
-    return String(fromSimpleContext).trim();
-  }
+  const fromSimpleContext = _findContextValue(contextMap, depSimple);
+  if (fromSimpleContext) return { value: fromSimpleContext, source: 'context' };
 
   const fromRequest = await _readRequestValueByFieldCode(tx, requestId, depFieldCode);
-  if (fromRequest) return fromRequest;
+  if (fromRequest) return { value: fromRequest, source: 'request' };
 
   const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
   if (vhPropertyName) {
     const fromQueryFilter = _extractEqValue(q?.$filter, vhPropertyName);
-    if (fromQueryFilter) return fromQueryFilter;
+    if (fromQueryFilter) return { value: fromQueryFilter, source: 'query_filter' };
   }
 
-  return null;
+  return { value: null, source: null };
 }
 
 async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
@@ -341,11 +442,22 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
   const requestId = _getRequestIdInput(req, q);
   const depFilters = [];
   const unresolvedRequired = [];
+  const resolvedDepLogs = [];
 
   for (const dep of deps) {
-    const value = await _resolveDependencyValue(tx, req, q, dep, contextMap, requestId);
+    const resolved = await _resolveDependencyValue(tx, req, q, dep, contextMap, requestId);
+    const value = resolved?.value;
     const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
     const isRequired = dep?.REQUIRED === true || String(dep?.REQUIRED).toLowerCase() === 'true' || dep?.REQUIRED === 1;
+    const dependsOn = String(dep?.DEPENDS_ON_FIELD_CODE || '').trim();
+
+    resolvedDepLogs.push({
+      dependsOn,
+      vhPropertyName,
+      value: value || '',
+      source: resolved?.source || 'none',
+      required: Boolean(isRequired)
+    });
 
     if (!value) {
       if (isRequired) unresolvedRequired.push(String(dep?.DEPENDS_ON_FIELD_CODE || '').trim() || vhPropertyName || '?');
@@ -360,6 +472,12 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
     remoteQ.$filter = remoteQ.$filter ? `(${remoteQ.$filter}) and (${depFilters.join(' and ')})` : depFilters.join(' and ');
   }
 
+  if (resolvedDepLogs.length) {
+    console.info(
+      `[VH_DEP_TRACE] vh=${vhName} fieldCode=${effectiveFieldCode} requestId=${requestId || '-'} deps=${JSON.stringify(resolvedDepLogs)} filter=${remoteQ.$filter || ''}`
+    );
+  }
+
   if (unresolvedRequired.length) {
     console.warn(`[VH_DEP_MISSING] ${vhName} fieldCode=${effectiveFieldCode} missing=${unresolvedRequired.join(',')}`);
     return { missingRequired: true, dependencies: deps };
@@ -371,7 +489,13 @@ function mapCustomerOrgVRows(rows) {
   return (rows || []).map((row) => ({
     Kunnr: '',
     Vkorg: String(row?.Vkorg ?? row?.SalesOrganization ?? '').trim(),
-    VkorgText: String(row?.VkorgText ?? row?.SalesOrganizationName ?? row?.SalesOrganizationText ?? '').trim(),
+    VkorgText: String(
+      row?.VkorgText ??
+      row?.SalesOrganizationName ??
+      row?.SalesOrganizationText ??
+      row?.SalesOrganization_Text ??
+      ''
+    ).trim(),
     Vtweg: '',
     VtwegText: '',
     Spart: '',
@@ -382,16 +506,32 @@ function mapCustomerOrgVRows(rows) {
 function mapCustomerVtwegRows(rows) {
   return (rows || []).map((row) => ({
     Vkorg: String(row?.Vkorg ?? row?.ProductSalesOrg ?? '').trim(),
-    VkorgText: String(row?.VkorgText ?? row?.SalesOrganizationName ?? '').trim(),
+    VkorgText: String(
+      row?.VkorgText ??
+      row?.SalesOrganizationName ??
+      row?.SalesOrganizationText ??
+      row?.SalesOrganization_Text ??
+      ''
+    ).trim(),
     Vtweg: String(row?.Vtweg ?? row?.ProductDistributionChnl ?? '').trim(),
-    VtwegText: String(row?.VtwegText ?? row?.DistributionChannelName ?? row?.DistributionChannelText ?? '').trim()
+    VtwegText: String(
+      row?.VtwegText ??
+      row?.DistributionChannelName ??
+      row?.DistributionChannelText ??
+      row?.DistributionChannel_Text ??
+      row?.ProductDistributionChnl_Text ??
+      ''
+    ).trim()
   })).filter((row) => row.Vkorg && row.Vtweg);
 }
 
 function mapCustomerSpartRows(rows) {
   return (rows || []).map((row) => ({
     Spart: String(row?.Spart ?? row?.Division ?? '').trim(),
-    SpartText: String(row?.SpartText ?? row?.DivisionName ?? row?.DivisionText ?? '').trim()
+    SpartText: String(row?.SpartText ?? row?.DivisionName ?? row?.DivisionText ?? row?.Division_Text ?? '').trim(),
+    Division: String(row?.Division ?? row?.Spart ?? '').trim(),
+    Division_Text: String(row?.Division_Text ?? row?.DivisionName ?? row?.DivisionText ?? row?.SpartText ?? '').trim(),
+    DivisionOID: String(row?.DivisionOID ?? '').trim()
   })).filter((row) => row.Spart);
 }
 
@@ -607,7 +747,7 @@ async function readCustomerSpart(req) {
   rows = mapCustomerSpartRows(rows);
 
   if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = applyLocalSearch(rows, localSearch, ['Spart', 'SpartText']);
+  if (localSearch) rows = applyLocalSearch(rows, localSearch, ['Spart', 'SpartText', 'Division', 'Division_Text', 'DivisionOID']);
   if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
 
   const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
@@ -721,6 +861,7 @@ async function readVH(req, vhName) {
   if (!fieldCode) {
     const fieldCodes = await _getVhFieldCodes(tx, vhName);
     if (fieldCodes.length === 1) fieldCode = fieldCodes[0];
+    else if (fieldCodes.length > 1) fieldCode = _resolveFieldCodeByQueryHints(fieldCodes, q);
   }
 
   if (localFilter && filterMode === 'local') {
@@ -754,14 +895,14 @@ async function readVH(req, vhName) {
 
   let rows;
   try {
-    rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
+    rows = await _s4GetWithEntityFallback(cfg, remoteQ);
   } catch (err) {
     if (localFilter && filterMode === 'auto' && isFilterUnsupportedError(err)) {
       const retryQ = { ...q };
       delete retryQ.$filter;
       delete retryQ.$top;
       delete retryQ.$skip;
-      rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: retryQ });
+      rows = await _s4GetWithEntityFallback(cfg, retryQ);
       forceLocalFilter = true;
     } else {
       throw err;
@@ -798,9 +939,14 @@ module.exports = {
   readMaterialProduct: (req) => readVH(req, 'VH_MaterialProduct'),
   readMaterialSalesOrg: (req) => readVH(req, 'VH_MaterialSalesOrg'),
   readMaterialVtweg: (req) => readVH(req, 'VH_MaterialVtweg'),
+  readMaterialKtgrm: (req) => readVH(req, 'VH_MaterialKtgrm'),
   readCustomerOrgV,
   readCustomerVtweg,
   readCustomerSpart,
+  readCustomerLzone: (req) => readVH(req, 'VH_CustomerLzone'),
+  readCustomerRegion: (req) => readVH(req, 'VH_CustomerRegion'),
+  readCustomerPaymentCondition: (req) => readVH(req, 'VH_CustomerPaymentCondition'),
+  readCustomerBzirk: (req) => readVH(req, 'VH_CustomerBzirk'),
   readCustomerSoc,
   readCustomerCom:  (req) => readVH(req, 'VH_CustomerCom'),
   readCustomerEmp:  (req) => readVH(req, 'VH_CustomerEmp'),

@@ -5,6 +5,51 @@ function isDevToolsEnabled() {
   return process.env.NODE_ENV !== 'production' || String(process.env.MDG_DEV_TOOLS).toLowerCase() === 'true';
 }
 
+function _toText(payload) {
+  if (typeof payload === 'string') return payload;
+  if (Buffer.isBuffer(payload)) return payload.toString('utf8');
+  if (payload === undefined || payload === null) return '';
+  try {
+    return JSON.stringify(payload);
+  } catch (_) {
+    return String(payload);
+  }
+}
+
+function _extractMessageFromBody(payload) {
+  if (!payload) return '';
+
+  if (typeof payload === 'object') {
+    const candidates = [
+      payload?.error?.message?.value,
+      payload?.error?.message,
+      payload?.message?.value,
+      payload?.message,
+      payload?.error_description
+    ];
+    const first = candidates.find(v => typeof v === 'string' && v.trim());
+    if (first) return first.trim();
+  }
+
+  const bodyText = _toText(payload);
+  if (!bodyText) return '';
+
+  // OData XML error body: <message ...>...</message>
+  const xmlMsg = bodyText.match(/<message[^>]*>([\s\S]*?)<\/message>/i);
+  if (xmlMsg?.[1]) return xmlMsg[1].trim();
+
+  // Generic JSON body encoded as text.
+  try {
+    const parsed = JSON.parse(bodyText);
+    const jsonMsg = parsed?.error?.message?.value || parsed?.error?.message || parsed?.message?.value || parsed?.message;
+    if (typeof jsonMsg === 'string' && jsonMsg.trim()) return jsonMsg.trim();
+  } catch (_) {
+    // not JSON text
+  }
+
+  return bodyText.slice(0, 240).trim();
+}
+
 async function fetchS4Metadata(req) {
 
   const servicePath = typeof req.data?.servicePath === 'string' ? req.data.servicePath.trim() : '';
@@ -33,25 +78,29 @@ async function fetchS4Metadata(req) {
     if (data === undefined || data === null) return '';
     return String(data);
   } catch (err) {
+    const status = err?.response?.status || err?.statusCode || err?.cause?.response?.status || 500;
+    const rawBody = err?.response?.data ?? err?.cause?.response?.data;
+    const backendMessage = _extractMessageFromBody(rawBody);
+    const correlationId =
+      err?.response?.headers?.['x-correlationid'] ||
+      err?.response?.headers?.['x-correlation-id'] ||
+      err?.correlationId ||
+      '';
+
     if (isDevToolsEnabled()) {
-      const status = err?.response?.status || err?.statusCode || err?.cause?.response?.status || 'unknown';
-      const rawBody = err?.response?.data ?? err?.cause?.response?.data ?? '';
-      const bodyText = typeof rawBody === 'string'
-        ? rawBody
-        : Buffer.isBuffer(rawBody)
-          ? rawBody.toString('utf8')
-          : rawBody
-            ? JSON.stringify(rawBody)
-            : '';
+      const bodyText = _toText(rawBody);
       console.error('fetchS4Metadata error', {
         destination: DESTINATION_NAME,
         url,
         status,
+        correlationId,
         body: bodyText.slice(0, 300)
       });
     }
-    const msg = err?.message || 'Failed to fetch S/4 metadata';
-    req.reject(502, msg);
+
+    const detail = backendMessage || err?.message || 'Failed to fetch S/4 metadata';
+    const suffix = correlationId ? ` (correlationId: ${correlationId})` : '';
+    req.reject(502, `S/4 metadata request failed (upstream ${status}): ${detail}${suffix}`);
   }
 }
 

@@ -172,6 +172,104 @@ function _extractSapErrorMessage(body) {
   return text ? text.slice(0, 200) : 'SAP integration error';
 }
 
+function _toStepCode(processCode, entitySet, targetCode) {
+  const p = String(processCode || '').trim().toUpperCase();
+  const e = String(entitySet || '').trim().toUpperCase();
+  const t = String(targetCode || '').trim().toUpperCase();
+  if (p === 'CUSTOMER_CREATION') {
+    if (e === 'CLIENTESGENERALSET') return 'CUSTOMER_CREATE';
+    if (e === 'DESTMERCADERIAGENERALSET') return 'DESTMERC_CREATE';
+    if (e === 'DESTFACTURAGENERALSET') return 'DESTFACT_CREATE';
+    if (e === 'DESTFACTURACOMERCIALSET') return 'DESTFACT_SALES_EXTEND';
+  }
+  if (p === 'TRANSPORT_DRIVER_CREATION') {
+    if (e === 'CONDUCTORESGENERALSET') return 'DRIVER_CREATE';
+    if (e === 'CONDUCTORESCOMERCIALSET') return 'DRIVER_SALES_EXTEND';
+  }
+  if (t) return t.replace(/[^A-Z0-9]+/g, '_');
+  if (e) return e.replace(/[^A-Z0-9]+/g, '_');
+  return 'SAP_STEP';
+}
+
+function _toStepStatus(ok, explicitStatus = null) {
+  if (explicitStatus) return String(explicitStatus).trim().toUpperCase();
+  return ok ? 'SUCCESS' : 'ERROR';
+}
+
+function _toStepMessage({ ok, status, entitySet, sapObjectKey, sapErrorMessage, explicitMessage }) {
+  if (explicitMessage) return String(explicitMessage).slice(0, 400);
+  const s = String(status || '').toUpperCase();
+  if (s === 'SKIPPED') return `Step ${entitySet} skipped`;
+  if (ok) return `Step ${entitySet} succeeded${sapObjectKey ? ` (ID: ${sapObjectKey})` : ''}`;
+  return `Step ${entitySet} failed: ${sapErrorMessage || 'SAP integration error'}`;
+}
+
+function _buildSapResultEnvelope({
+  processCode,
+  stepCode,
+  targetCode,
+  entitySet,
+  status,
+  externalId,
+  message,
+  correlationId,
+  responseBody
+}) {
+  return {
+    _mdgResult: {
+      processCode: processCode || null,
+      stepCode: stepCode || null,
+      targetCode: targetCode || null,
+      entitySet: entitySet || null,
+      status: status || null,
+      externalId: externalId || null,
+      message: message || null,
+      correlationId: correlationId || null,
+      createdAt: new Date().toISOString()
+    },
+    sapResponse: responseBody ?? null
+  };
+}
+
+async function _upsertSapStepMessage(tx, {
+  requestId,
+  sapTargetId,
+  httpStatus,
+  correlationId,
+  sapObjectKey,
+  payload,
+  responseBody,
+  processCode,
+  targetCode,
+  entitySet,
+  status,
+  message
+}) {
+  const normalizedStatus = String(status || '').trim().toUpperCase();
+  const envelope = _buildSapResultEnvelope({
+    processCode,
+    stepCode: _toStepCode(processCode, entitySet, targetCode),
+    targetCode,
+    entitySet,
+    status: normalizedStatus,
+    externalId: sapObjectKey,
+    message,
+    correlationId,
+    responseBody
+  });
+  const payloadJson = _stringifySafe(payload) || '{}';
+  const responseJson = _stringifySafe(envelope) || '';
+
+  const id = cds.utils.uuid();
+  await tx.run(
+    `INSERT INTO "MDG_REQUEST_SAP_MESSAGE"
+     ("ID", "REQUEST_ID", "SAP_TARGET_ID", "HTTP_STATUS", "CORRELATION_ID", "SAP_OBJECT_KEY", "PAYLOAD_JSON", "RESPONSE_JSON", "CREATEDAT")
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, requestId, sapTargetId, httpStatus, correlationId, sapObjectKey, payloadJson, responseJson, new Date()]
+  );
+  return id;
+}
+
 function _buildSkippedFieldsComment(skippedFields) {
   if (!Array.isArray(skippedFields) || skippedFields.length === 0) return null;
   const compact = skippedFields.map((s) => ({
@@ -1059,17 +1157,29 @@ async function _postToS4AndPersist(tx, {
     correlationId
   });
   const sapObjectKey = _extractSapObjectKey(responseBody);
-  const payloadJson = _stringifySafe(payload) || '{}';
   const responseJson = _stringifySafe(responseBody) || '';
 
-  await tx.run(
-    `INSERT INTO "MDG_REQUEST_SAP_MESSAGE"
-     ("ID", "REQUEST_ID", "SAP_TARGET_ID", "HTTP_STATUS", "CORRELATION_ID", "SAP_OBJECT_KEY", "PAYLOAD_JSON", "RESPONSE_JSON", "CREATEDAT")
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [cds.utils.uuid(), requestId, sapTargetId, status, correlationId, sapObjectKey, payloadJson, responseJson, new Date()]
-  );
-
   const ok = status >= 200 && status < 300;
+  await _upsertSapStepMessage(tx, {
+    requestId,
+    sapTargetId,
+    httpStatus: status,
+    correlationId,
+    sapObjectKey,
+    payload,
+    responseBody,
+    processCode,
+    targetCode: sapTarget?.targetCode || null,
+    entitySet,
+    status: _toStepStatus(ok),
+    message: _toStepMessage({
+      ok,
+      status: _toStepStatus(ok),
+      entitySet,
+      sapObjectKey,
+      sapErrorMessage: ok ? null : _extractSapErrorMessage(responseBody)
+    })
+  });
   const finalStatus = ok ? STATUS_COMPLETED : STATUS.REWORK;
   const currentHeaderRows = await tx.run(
     `SELECT "SUBJECT_ID", "SUBJECT_TYPE"
@@ -1371,6 +1481,104 @@ async function _readLatestSuccessfulStep(tx, { requestId, processId, entitySet }
   return rows?.[0] || null;
 }
 
+async function _persistSkippedStepResult(tx, {
+  requestId,
+  processCode,
+  sapTarget,
+  reason,
+  message,
+  externalId = null
+}) {
+  await _upsertSapStepMessage(tx, {
+    requestId,
+    sapTargetId: sapTarget?.id || null,
+    httpStatus: 208,
+    correlationId: null,
+    sapObjectKey: externalId || null,
+    payload: {},
+    responseBody: { skipped: true, reason: reason || null },
+    processCode,
+    targetCode: sapTarget?.targetCode || null,
+    entitySet: sapTarget?.entitySet || null,
+    status: 'SKIPPED',
+    message: message || `Step ${sapTarget?.entitySet || sapTarget?.targetCode || 'UNKNOWN'} skipped`
+  });
+}
+
+function _parseResultEnvelope(responseJsonRaw) {
+  if (!responseJsonRaw) return null;
+  let parsed = null;
+  try {
+    parsed = typeof responseJsonRaw === 'string' ? JSON.parse(responseJsonRaw) : responseJsonRaw;
+  } catch (_err) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  return parsed._mdgResult && typeof parsed._mdgResult === 'object' ? parsed._mdgResult : null;
+}
+
+async function _fetchRequestResults(tx, requestId) {
+  const rows = await tx.run(
+    `SELECT
+        m."ID" AS "ID",
+        m."HTTP_STATUS" AS "HTTP_STATUS",
+        m."CORRELATION_ID" AS "CORRELATION_ID",
+        m."SAP_OBJECT_KEY" AS "SAP_OBJECT_KEY",
+        m."RESPONSE_JSON" AS "RESPONSE_JSON",
+        m."CREATEDAT" AS "CREATEDAT",
+        t."TARGET_CODE" AS "TARGET_CODE",
+        t."ENTITYSET" AS "ENTITYSET",
+        p."PROCESS_CODE" AS "PROCESS_CODE"
+       FROM "MDG_REQUEST_SAP_MESSAGE" m
+       LEFT JOIN "MDG_SAP_TARGET" t ON t."ID" = m."SAP_TARGET_ID"
+       LEFT JOIN "MDG_REQUEST_HEADER" r ON r."ID" = m."REQUEST_ID"
+       LEFT JOIN "MDG_PROCESS" p ON p."ID" = r."PROCESS_ID"
+      WHERE m."REQUEST_ID" = ?
+      ORDER BY m."CREATEDAT" ASC, m."ID" ASC`,
+    [requestId]
+  );
+
+  const normalized = (rows || []).map((row) => {
+    const meta = _parseResultEnvelope(row.RESPONSE_JSON);
+    const statusFromHttp = Number(row.HTTP_STATUS || 0) >= 200 && Number(row.HTTP_STATUS || 0) < 300 ? 'SUCCESS' : 'ERROR';
+    const status = String(meta?.status || statusFromHttp).toUpperCase();
+    const stepCode = meta?.stepCode
+      || _toStepCode(row.PROCESS_CODE, row.ENTITYSET, row.TARGET_CODE);
+    const message = meta?.message
+      || _toStepMessage({
+        ok: status === 'SUCCESS',
+        status,
+        entitySet: row.ENTITYSET,
+        sapObjectKey: row.SAP_OBJECT_KEY,
+        sapErrorMessage: null
+      });
+    return {
+      stepCode,
+      status,
+      externalId: String(meta?.externalId || row.SAP_OBJECT_KEY || '').trim() || null,
+      message,
+      targetCode: row.TARGET_CODE || null,
+      entitySet: row.ENTITYSET || null,
+      correlationId: row.CORRELATION_ID || null,
+      createdAt: row.CREATEDAT
+    };
+  });
+
+  // Keep UI idempotent: expose latest record per step code while preserving storage history.
+  const latestByStep = new Map();
+  for (const item of normalized) {
+    const key = String(item.stepCode || '').trim().toUpperCase();
+    if (!key) continue;
+    const prev = latestByStep.get(key);
+    const prevTs = prev?.createdAt ? new Date(prev.createdAt).getTime() : -1;
+    const currTs = item?.createdAt ? new Date(item.createdAt).getTime() : -1;
+    if (!prev || currTs >= prevTs) latestByStep.set(key, item);
+  }
+  return Array.from(latestByStep.values())
+    .filter((item) => String(item.status || '').toUpperCase() !== 'SKIPPED')
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
 async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
   const tx = cds.tx(req);
   const userId = currentUserId(req);
@@ -1442,6 +1650,13 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
 
       const disabledTargets = (allTargets || []).filter((t) => !t.isEnabled);
       for (const target of disabledTargets) {
+        await _persistSkippedStepResult(tx, {
+          requestId,
+          processCode,
+          sapTarget: target,
+          reason: 'target_disabled',
+          message: `Paso ${target.entitySet || target.targetCode || target.id} omitido por configuración deshabilitada`
+        });
         await insertComment(tx, {
           requestId,
           authorUser: userId,
@@ -1493,6 +1708,14 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
               sapObjectKey: resumedId,
               resumed: true
             }
+          });
+          await _persistSkippedStepResult(tx, {
+            requestId,
+            processCode,
+            sapTarget: step,
+            reason: 'already_completed',
+            message: `Paso ${entitySet} omitido por estar previamente completado`,
+            externalId: resumedId || null
           });
           await insertActionLog(tx, {
             requestId,
@@ -1662,6 +1885,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         requestId,
         processCode,
         entitySet: orderedSteps.map((s) => s.entitySet).join(','),
+        stepCount: stepResults.length,
         httpStatus: failed ? failed.result.httpStatus : (lastStep?.httpStatus || 200),
         finalStatus,
         skippedFields: anySkipped,
@@ -1709,6 +1933,14 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
             httpStatus: 208,
             sapObjectKey: conductorId,
             skippedStep: true
+          });
+          await _persistSkippedStepResult(tx, {
+            requestId,
+            processCode,
+            sapTarget: target,
+            reason: 'already_completed',
+            message: `Paso ${target.entitySet} omitido por estar previamente completado`,
+            externalId: conductorId
           });
           await insertActionLog(tx, {
             requestId,
@@ -1842,6 +2074,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         requestId,
         processCode,
         entitySet: orderedTargets.map((t) => t.entitySet).join(','),
+        stepCount: stepResults.length,
         httpStatus: last?.httpStatus || null,
         finalStatus,
         skippedFields: anySkipped,
@@ -1865,6 +2098,9 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         skippedFields,
         updateSubjectFromSap: true
       });
+      if (approveResult && approveResult.stepCount === undefined) {
+        approveResult.stepCount = 1;
+      }
     }
   } else {
     await tx.run(
@@ -1899,7 +2135,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     });
   }
 
-  if (actionName === 'APPROVE' && approveResult?.ok) {
+  if (actionName === 'APPROVE' && approveResult?.ok && Number(approveResult?.stepCount || 1) <= 1) {
     const objectKey = String(approveResult?.sapObjectKey || '').trim();
     const successMessage = objectKey
       ? `Aprobación enviada exitosamente a SAP. ID generado: ${objectKey}.`
@@ -1961,6 +2197,18 @@ async function approveRequest(req) {
   });
 }
 
+async function getRequestResults(req) {
+  const tx = cds.tx(req);
+  const requestId = req.data?.requestId || req.data?.REQUEST_ID || req.data?.ID || req.data?.id;
+  if (!requestId) req.reject(400, _t(req, 'idRequired'));
+
+  const request = await getRequestById(tx, requestId);
+  if (!request) req.reject(404, _t(req, 'requestNotFound', { requestId }));
+  if (request.ISDELETED) req.reject(409, _t(req, 'requestDeleted'));
+
+  return _fetchRequestResults(tx, requestId);
+}
+
 async function rejectRequest(req) {
   return _handleDecision(req, {
     actionName: 'REJECT',
@@ -1972,6 +2220,7 @@ async function rejectRequest(req) {
 function register(service) {
   service.on('approveRequest', approveRequest);
   service.on('rejectRequest', rejectRequest);
+  service.on('getRequestResults', getRequestResults);
 }
 
-module.exports = { register };
+module.exports = { register, getRequestResults };

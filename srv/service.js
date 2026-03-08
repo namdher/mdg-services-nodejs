@@ -1,4 +1,5 @@
 const cds = require('@sap/cds');
+let _requestResultsRouteRegistered = false;
 
 module.exports = cds.service.impl(async function () {
 
@@ -23,6 +24,10 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_CustomerOrgV', vh.readCustomerOrgV);
   this.on('READ', 'VH_CustomerVtweg', vh.readCustomerVtweg);
   this.on('READ', 'VH_CustomerSpart', vh.readCustomerSpart);
+  this.on('READ', 'VH_CustomerLzone', vh.readCustomerLzone);
+  this.on('READ', 'VH_CustomerRegion', vh.readCustomerRegion);
+  this.on('READ', 'VH_CustomerPaymentCondition', vh.readCustomerPaymentCondition);
+  this.on('READ', 'VH_CustomerBzirk', vh.readCustomerBzirk);
   this.on('READ', 'VH_CustomerSoc', vh.readCustomerSoc);
   this.on('READ', 'VH_CustomerCom', vh.readCustomerCom);
   this.on('READ', 'VH_CustomerEmp', vh.readCustomerEmp);
@@ -32,6 +37,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_MaterialProduct', vh.readMaterialProduct);
   this.on('READ', 'VH_MaterialSalesOrg', vh.readMaterialSalesOrg);
   this.on('READ', 'VH_MaterialVtweg', vh.readMaterialVtweg);
+  this.on('READ', 'VH_MaterialKtgrm', vh.readMaterialKtgrm);
   this.on('READ', 'VH_DriverGen', vh.readDriverGen);
   this.on('READ', 'VH_DriverRol', vh.readDriverRol);
   this.on('READ', 'VH_DriverCom', vh.readDriverCom);
@@ -46,6 +52,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_Resources', vh.readResources);
   this.on('READ', 'VH_BU_GROUP', internalVh.readVhBuGroup);
   this.on('READ', 'VH_Internal_TAXKD', internalVh.readVhInternalTaxkd);
+  this.on('READ', 'VH_Internal_Boolean', internalVh.readVhInternalBoolean);
   this.on('READ', 'VH_Internal_TATYP', internalVh.readVhInternalTatyp);
   this.on('READ', 'VH_Internal_BU_GROUP', internalVh.readVhInternalBuGroup);
   this.on('READ', 'VH_Internal_KTOKD', internalVh.readVhInternalKtokd);
@@ -57,6 +64,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_Internal_DEFLT_COMM', internalVh.readVhInternalDefltComm);
   this.on('READ', 'VH_Internal_ZZBKVID', internalVh.readVhInternalZzbkvid);
   this.on('READ', 'VH_Internal_MAHNA', internalVh.readVhInternalMahna);
+  this.on('READ', 'VH_Internal_MABER', internalVh.readVhInternalMaber);
   this.on('READ', 'VH_Internal_MAHNS', internalVh.readVhInternalMahns);
   this.on('READ', 'VH_Status', internalVh.readVhStatus);
   this.on('READ', 'VH_AllowedProcesses', overviewVh.readVhAllowedProcesses);
@@ -73,6 +81,7 @@ module.exports = cds.service.impl(async function () {
 
   this.on('whoAmI', auth.whoAmI);
   this.on('getAvailableProcesses', process.getAvailableProcesses);
+  this.on('getRequestResults', workflowActions.getRequestResults);
   this.on('getFormDefinition', form.getFormDefinition);
   this.on('prefillCustomer', prefill.prefillCustomer);
   this.on('fetchS4Metadata', s4Metadata.fetchS4Metadata);
@@ -80,5 +89,43 @@ module.exports = cds.service.impl(async function () {
   requestCrud.register(this);
   comments.register(this);
   workflowActions.register(this);
+
+  if (!_requestResultsRouteRegistered) {
+    _requestResultsRouteRegistered = true;
+    const srv = this;
+    const registerRequestResultsRoute = (app) => {
+      app.get('/mdg/request-results', async (req, res) => {
+        const requestId = String(req.query?.requestId || '').trim();
+        if (!requestId) {
+          res.status(400).json({
+            error: {
+              code: '400',
+              message: { lang: 'en', value: 'requestId is required' },
+              severity: 'error'
+            }
+          });
+          return;
+        }
+        try {
+          const result = await srv.send({
+            event: 'getRequestResults',
+            data: { requestId }
+          });
+          res.status(200).json(result || []);
+        } catch (err) {
+          const status = Number(err?.statusCode || 500);
+          res.status(status).json({
+            error: {
+              code: String(status),
+              message: { lang: 'en', value: String(err?.message || 'Internal Server Error') },
+              severity: 'error'
+            }
+          });
+        }
+      });
+    };
+    if (cds.app) registerRequestResultsRoute(cds.app);
+    else cds.on('bootstrap', registerRequestResultsRoute);
+  }
 
 });
