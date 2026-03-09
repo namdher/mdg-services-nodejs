@@ -329,6 +329,11 @@ service MDGService @(path:'/mdg') {
     Description                       : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_MaterialUoM {
+    key UnitOfMeasure                 : String(3);
+    UnitOfMeasure_Text                : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_DriverGen {
     key Kunnr   : String(10);
     Name1       : String(80);

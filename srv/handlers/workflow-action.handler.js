@@ -132,6 +132,19 @@ function _extractCorrelationId(responseHeaders, errorHeaders) {
     || null;
 }
 
+function _extractJwtFromReq(req) {
+  const authHeader =
+    req?.headers?.authorization ||
+    req?._?.req?.headers?.authorization ||
+    req?.http?.req?.headers?.authorization ||
+    cds?.context?.http?.req?.headers?.authorization ||
+    '';
+  const value = String(authHeader || '').trim();
+  if (!value) return null;
+  const m = value.match(/^Bearer\s+(.+)$/i);
+  return (m?.[1] || value || '').trim() || null;
+}
+
 function _extractSapObjectKey(body) {
   if (!body) return null;
   const root = body?.d || body;
@@ -773,6 +786,18 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
       rawValue = creationDateOverride;
     }
 
+    // Resource name rule:
+    // /SAPAPO/RES_HEAD.NAME must start with CL (prepend if missing, avoid duplicates).
+    const isResHeadName =
+      _normalizePropertyName(fieldCode) === _normalizePropertyName('/SAPAPO/RES_HEAD.NAME') ||
+      _normalizePropertyName(sapField) === _normalizePropertyName('/SAPAPO/RES_HEAD.NAME');
+    if (isResHeadName && rawValue !== undefined && rawValue !== null) {
+      const nameValue = String(rawValue).trim();
+      if (nameValue) {
+        rawValue = nameValue.toUpperCase().startsWith('CL') ? nameValue : `CL${nameValue}`;
+      }
+    }
+
     let canonicalSapField = sapField;
     let edmType = metadataProps[sapField];
     if (!edmType) {
@@ -1091,6 +1116,7 @@ async function _validateMandatoryForStep(tx, {
 }
 
 async function _postToS4AndPersist(tx, {
+  req,
   requestId,
   processId,
   processCode,
@@ -1107,6 +1133,7 @@ async function _postToS4AndPersist(tx, {
   const servicePath = String(sapTarget?.servicePath || '').trim();
   const entitySet = String(sapTarget?.entitySet || '').trim();
   const sapTargetId = sapTarget?.id || null;
+  const jwt = _extractJwtFromReq(req);
 
   if (Array.isArray(skippedFields) && skippedFields.length) {
     console.warn('[SAP_PAYLOAD_SKIPPED_FIELDS]', JSON.stringify({
@@ -1126,7 +1153,7 @@ async function _postToS4AndPersist(tx, {
 
   try {
     const res = await executeHttpRequest(
-      { destinationName },
+      jwt ? { destinationName, jwt } : { destinationName },
       {
       method: 'POST',
       url,
@@ -1789,6 +1816,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         }
 
         const result = await _postToS4AndPersist(tx, {
+          req,
           requestId,
           processId,
           processCode,
@@ -1991,6 +2019,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         }
 
         const result = await _postToS4AndPersist(tx, {
+          req,
           requestId,
           processId,
           processCode,
@@ -2088,6 +2117,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
 
       const { payload, skippedFields } = await _buildSapPayload(tx, requestId, sapTarget.entitySet, processId);
       approveResult = await _postToS4AndPersist(tx, {
+        req,
         requestId,
         processId,
         processCode,
