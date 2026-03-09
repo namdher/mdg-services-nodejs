@@ -34,12 +34,25 @@
 
 @cds.persistence.exists entity MDG_FIELD_VH_DEPENDENCY {
   key ID : UUID;
+  FIELD_ID : UUID;
   FIELD_CODE : String(80);
   DEPENDS_ON_FIELD_CODE : String(80);
   VH_PROPERTY_NAME : String(120);
-  REQUIRED : Boolean;
+  IS_REQUIRED : Boolean;
   EVALUATION_ORDER : Integer;
-  IS_ACTIVE : Boolean;
+  IS_ENABLED : Boolean;
+}
+
+@cds.persistence.exists entity MDG_VH_ROUTE {
+  key ID : UUID;
+  VH_ENTITYSET : String(120);
+  DESTINATION_NAME : String(120);
+  SERVICE_PATH : String(200);
+  REMOTE_ENTITYSET : String(120);
+  REMOTE_KEY_FIELD : String(80);
+  REMOTE_TEXT_FIELD : String(80);
+  REMOTE_SEARCH_FIELDS : String(500);
+  IS_ENABLED : Boolean;
 }
 
 @cds.persistence.exists entity MDG_BLOCK_FIELD {

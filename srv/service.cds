@@ -97,16 +97,18 @@ service MDGService @(path:'/mdg') {
   };
 
   @cds.persistence.skip @readonly entity VH_CustomerGen {
-    key Kunnr   : String(10);
-    Partner     : String(10);
-    Name1       : String(80);
+    key BusinessPartner         : String(10);
+    BusinessPartnerName     : String(80);
+    BusinessPartnerCategory : String(2);
+    Kunnr   : String(10);
+    Partner : String(10);
+    Name1   : String(80);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerOrgV {
-    key ID    : String(200);
+    key SalesOrganization       : String(4);
+    SalesOrganization_Text  : String(80);
     Kunnr     : String(10);
-    Vkorg     : String(4);
-    VkorgText : String(80);
     Vtweg     : String(2);
     VtwegText : String(80);
     Spart     : String(2);
@@ -114,29 +116,31 @@ service MDGService @(path:'/mdg') {
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerVtweg {
-    key ID      : String(200);
-    Vkorg       : String(4);
-    VkorgText   : String(80);
-    Vtweg       : String(2);
-    VtwegText   : String(80);
+    key ProductDistributionChnl : String(2);
+    ProductSalesOrg         : String(4);
+    Country                 : String(3);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerSpart {
-    key ID      : String(200);
-    Spart       : String(2);
-    SpartText   : String(80);
-    Division    : String(2);
+    key Division    : String(2);
     Division_Text : String(80);
     DivisionOID : String(40);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerSoc {
-    key ID    : String(200);
+    key CompanyCode       : String(4);
+    CompanyCodeName   : String(80);
     Kunnr     : String(10);
-    Bukrs     : String(4);
-    BukrsText : String(80);
     Maber     : String(2);
     MaberText : String(80);
+    DunningArea       : String(2);
+    DunningArea_Text  : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerDunningArea {
+    key DunningArea                 : String(2);
+    DunningArea_Text                : String(120);
+    CompanyCode                     : String(4);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerCom {
@@ -163,6 +167,10 @@ service MDGService @(path:'/mdg') {
     Bankl     : String(15);
     Bankn     : String(18);
     EbppAccname : String(120);
+    Country      : String(3);
+    Country_Text : String(120);
+    Bank         : String(15);
+    BankInternalID : String(15);
   }
 
   @cds.persistence.skip @readonly entity VH_CustomerImp {
@@ -196,6 +204,99 @@ service MDGService @(path:'/mdg') {
     SalesDistrict_Text              : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_DestMercBP {
+    key BusinessPartner             : String(10);
+    BusinessPartnerCategory         : String(2);
+    BusinessPartnerName             : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercOrgV {
+    key SalesOrganization           : String(4);
+    SalesOrganization_Text          : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercVtweg {
+    key ProductDistributionChnl     : String(2);
+    ProductSalesOrg                 : String(4);
+    Country                         : String(3);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercSpart {
+    key Division                    : String(2);
+    Division_Text                   : String(80);
+    DivisionOID                     : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercBzirk {
+    key SalesDistrict               : String(6);
+    SalesDistrict_Text              : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercSoc {
+    key CompanyCode                 : String(4);
+    CompanyCodeName                 : String(80);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercDunningArea {
+    key DunningArea                 : String(2);
+    DunningArea_Text                : String(120);
+    CompanyCode                     : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercPaymentCondition {
+    key PaymentCondition            : String(4);
+    PaymentCondition_Text           : String(120);
+    PaymentTerms                    : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercImp {
+    key Aland                       : String(3);
+    Tatyp                           : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestFactBP {
+    key BusinessPartner             : String(10);
+    BusinessPartnerCategory         : String(2);
+    BusinessPartnerName             : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestFactSalesOrg {
+    key SalesOrganization           : String(4);
+    SalesOrganization_Text          : String(80);
+    SalesOrganizationCurrency       : String(5);
+    CompanyCode                     : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestFactVtweg {
+    key ProductDistributionChnl     : String(2);
+    Country                         : String(3);
+    ProductSalesOrg                 : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercBanks {
+    key Country                     : String(3);
+    Country_Text                    : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercBank {
+    key Bank                        : String(15);
+    BankInternalID                  : String(15);
+    BankCountry                     : String(3);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercLzone {
+    key TransportZone               : String(10);
+    CountryCode                     : String(3);
+    TransportZoneDescription        : String(120);
+    TransportZone_Text              : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercRegion {
+    key Region                      : String(3);
+    Region_Text                     : String(120);
+    Country                         : String(3);
+  }
+
   @cds.persistence.skip @readonly entity VH_CustomerNif {
     key ID      : String(200);
     Kunnr       : String(10);
@@ -219,8 +320,8 @@ service MDGService @(path:'/mdg') {
 
   @cds.persistence.skip @readonly entity VH_MaterialVtweg {
     key ProductDistributionChnl      : String(2);
-    ProductDistributionChnl_Text     : String(80);
     ProductSalesOrg                  : String(4);
+    Country                          : String(3);
   }
 
   @cds.persistence.skip @readonly entity VH_MaterialKtgrm {
@@ -235,11 +336,10 @@ service MDGService @(path:'/mdg') {
   }
 
   @cds.persistence.skip @readonly entity VH_DriverRol {
-    key ID      : String(200);
-    Kunnr       : String(10);
-    Bp_Role     : String(6);
-    Dfval       : String(20);
-    Role        : String(4);
+    key Kunnr       : String(10);
+    key Bp_Role     : String(6);
+    key Role        : String(4);
+    key Dfval       : String(20);
     ValidFrom   : String(40);
   }
 

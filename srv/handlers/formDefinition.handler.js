@@ -5,6 +5,7 @@ const cds = require('@sap/cds')
 const { resolveGroups } = require('./auth.handler')
 
 const DEFAULT_FIELD_CONTROL = 0
+const VH_DEP_DEBUG = String(process.env.MDG_VH_DEP_DEBUG || 'false').toLowerCase() === 'true'
 
 function _toLocalIsoDate(value = new Date()) {
   const year = value.getFullYear()
@@ -138,43 +139,118 @@ async function _readFormFields(tx, { processId, processRoleId, countryCode }) {
   return tx.run(sql, [processRoleId, processRoleId, countryCode, processId])
 }
 
-async function _readVhDependenciesByFieldCodes(tx, fieldCodes) {
-  const aFieldCodes = Array.from(new Set((fieldCodes || []).map((x) => String(x || '').trim()).filter(Boolean)))
-  if (!aFieldCodes.length) return {}
-
-  const placeholders = aFieldCodes.map(() => '?').join(',')
+async function _readVhDependencies(tx, fields) {
+  const items = Array.isArray(fields) ? fields : []
+  const fieldIds = Array.from(new Set(items.map((x) => String(x?.FIELD_ID || '').trim()).filter(Boolean)))
+  const fieldCodes = Array.from(new Set(items.map((x) => String(x?.FIELD_CODE || '').trim()).filter(Boolean)))
+  if (!fieldIds.length && !fieldCodes.length) return { byFieldId: {}, byFieldCode: {} }
 
   try {
-    const rows = await tx.run(
-      `SELECT
-          "FIELD_CODE",
-          "DEPENDS_ON_FIELD_CODE",
-          "VH_PROPERTY_NAME",
-          "REQUIRED",
-          "EVALUATION_ORDER",
-          "IS_ACTIVE"
-         FROM "MDG_FIELD_VH_DEPENDENCY"
-        WHERE "IS_ACTIVE" = true
-          AND "FIELD_CODE" IN (${placeholders})
-        ORDER BY "FIELD_CODE" ASC, "EVALUATION_ORDER" ASC`,
-      aFieldCodes
-    )
+    let rows = []
 
-    return rows.reduce((acc, row) => {
-      const fieldCode = String(row.FIELD_CODE || '').trim()
-      if (!fieldCode) return acc
-      if (!acc[fieldCode]) acc[fieldCode] = []
-      acc[fieldCode].push({
+    // Primary path: real HANA structure with FIELD_ID + IS_ENABLED.
+    if (fieldIds.length) {
+      const placeholders = fieldIds.map(() => '?').join(',')
+      rows = await tx.run(
+        `SELECT
+            d."FIELD_ID"              as "FIELD_ID",
+            d."FIELD_CODE"            as "FIELD_CODE",
+            d."DEPENDS_ON_FIELD_CODE" as "DEPENDS_ON_FIELD_CODE",
+            d."VH_PROPERTY_NAME"      as "VH_PROPERTY_NAME",
+            d."IS_REQUIRED"           as "IS_REQUIRED",
+            d."EVALUATION_ORDER"      as "EVALUATION_ORDER"
+           FROM "MDG_FIELD_VH_DEPENDENCY" d
+          WHERE d."IS_ENABLED" = true
+            AND d."FIELD_ID" IN (${placeholders})
+          ORDER BY d."FIELD_ID" ASC, d."EVALUATION_ORDER" ASC`,
+        fieldIds
+      )
+    }
+
+    // Secondary path: by FIELD_CODE on real structure.
+    if (!rows.length && fieldCodes.length) {
+      const placeholders = fieldCodes.map(() => '?').join(',')
+      rows = await tx.run(
+        `SELECT
+            "FIELD_ID"                as "FIELD_ID",
+            "FIELD_CODE"              as "FIELD_CODE",
+            "DEPENDS_ON_FIELD_CODE"   as "DEPENDS_ON_FIELD_CODE",
+            "VH_PROPERTY_NAME"        as "VH_PROPERTY_NAME",
+            "IS_REQUIRED"             as "IS_REQUIRED",
+            "EVALUATION_ORDER"        as "EVALUATION_ORDER"
+           FROM "MDG_FIELD_VH_DEPENDENCY"
+          WHERE "IS_ENABLED" = true
+            AND "FIELD_CODE" IN (${placeholders})
+          ORDER BY "FIELD_CODE" ASC, "EVALUATION_ORDER" ASC`,
+        fieldCodes
+      )
+    }
+
+    // Backward compatible fallback for older landscapes (IS_ACTIVE/REQUIRED).
+    if (!rows.length && fieldIds.length) {
+      const placeholders = fieldIds.map(() => '?').join(',')
+      rows = await tx.run(
+        `SELECT
+            fc."ID"                   as "FIELD_ID",
+            fc."FIELD_CODE"           as "FIELD_CODE",
+            d."DEPENDS_ON_FIELD_CODE" as "DEPENDS_ON_FIELD_CODE",
+            d."VH_PROPERTY_NAME"      as "VH_PROPERTY_NAME",
+            d."REQUIRED"              as "IS_REQUIRED",
+            d."EVALUATION_ORDER"      as "EVALUATION_ORDER"
+           FROM "MDG_FIELD_CATALOG" fc
+           JOIN "MDG_FIELD_VH_DEPENDENCY" d
+             ON d."FIELD_CODE" = fc."FIELD_CODE"
+            AND d."IS_ACTIVE" = true
+          WHERE fc."ID" IN (${placeholders})
+          ORDER BY fc."ID" ASC, d."EVALUATION_ORDER" ASC`,
+        fieldIds
+      )
+    }
+
+    if (!rows.length && fieldCodes.length) {
+      const placeholders = fieldCodes.map(() => '?').join(',')
+      rows = await tx.run(
+        `SELECT
+            NULL                      as "FIELD_ID",
+            "FIELD_CODE"              as "FIELD_CODE",
+            "DEPENDS_ON_FIELD_CODE"   as "DEPENDS_ON_FIELD_CODE",
+            "VH_PROPERTY_NAME"        as "VH_PROPERTY_NAME",
+            "REQUIRED"                as "IS_REQUIRED",
+            "EVALUATION_ORDER"        as "EVALUATION_ORDER"
+           FROM "MDG_FIELD_VH_DEPENDENCY"
+          WHERE "IS_ACTIVE" = true
+            AND "FIELD_CODE" IN (${placeholders})
+          ORDER BY "FIELD_CODE" ASC, "EVALUATION_ORDER" ASC`,
+        fieldCodes
+      )
+    }
+
+    const byFieldId = {}
+    const byFieldCode = {}
+    for (const row of rows || []) {
+      const dep = {
         parentFieldCode: String(row.DEPENDS_ON_FIELD_CODE || '').trim(),
         vhPropertyName: String(row.VH_PROPERTY_NAME || '').trim(),
-        required: row.REQUIRED === true || String(row.REQUIRED).toLowerCase() === 'true' || row.REQUIRED === 1,
+        isRequired:
+          row.IS_REQUIRED === true || String(row.IS_REQUIRED).toLowerCase() === 'true' || row.IS_REQUIRED === 1,
         evaluationOrder: Number(row.EVALUATION_ORDER || 0)
-      })
-      return acc
-    }, {})
+      }
+      const fieldId = String(row.FIELD_ID || '').trim()
+      const fieldCode = String(row.FIELD_CODE || '').trim()
+      if (fieldId) {
+        if (!byFieldId[fieldId]) byFieldId[fieldId] = []
+        byFieldId[fieldId].push(dep)
+      }
+      if (fieldCode) {
+        if (!byFieldCode[fieldCode]) byFieldCode[fieldCode] = []
+        byFieldCode[fieldCode].push(dep)
+      }
+    }
+
+    return { byFieldId, byFieldCode }
   } catch (_) {
     // Backward compatible path if dependency table is not available in a landscape.
-    return {}
+    return { byFieldId: {}, byFieldCode: {} }
   }
 }
 
@@ -218,13 +294,25 @@ async function getFormDefinition(req) {
     processRoleId,
     countryCode
   })
-  const depsByFieldCode = await _readVhDependenciesByFieldCodes(
-    tx,
-    rows.map((r) => r.FIELD_CODE)
-  )
+  const deps = await _readVhDependencies(tx, rows)
 
   // 5) Respuesta OData: DEVUELVE ARRAY (NO string JSON)
   return rows.map(r => ({
+    ...(VH_DEP_DEBUG
+      ? (() => {
+          const fieldId = String(r.FIELD_ID || '').trim()
+          const fieldCode = String(r.FIELD_CODE || '').trim()
+          const depsByFieldId = deps.byFieldId[fieldId] || []
+          const depsByFieldCode = deps.byFieldCode[fieldCode] || []
+          const selectedDependency = depsByFieldId.length ? depsByFieldId : depsByFieldCode
+          console.info(
+            `[VH_DEP_DEBUG] processCode=${processCode} fieldId=${fieldId} fieldCode=${fieldCode} depsByFieldId=${JSON.stringify(
+              depsByFieldId
+            )} depsByFieldCode=${JSON.stringify(depsByFieldCode)} selectedDependency=${JSON.stringify(selectedDependency)}`
+          )
+          return {}
+        })()
+      : {}),
     processCode,
     countryCode,
     roleCode,
@@ -255,7 +343,10 @@ async function getFormDefinition(req) {
     vhKeyField: r.VH_KEY_FIELD,
     vhTextField: r.VH_TEXT_FIELD,
     vhSearchFields: r.VH_SEARCH_FIELDS,
-    vhDependency: depsByFieldCode[String(r.FIELD_CODE || '').trim()] || []
+    vhDependency:
+      deps.byFieldId[String(r.FIELD_ID || '').trim()] ||
+      deps.byFieldCode[String(r.FIELD_CODE || '').trim()] ||
+      []
   }))
 }
 

@@ -1,257 +1,97 @@
 const cds = require('@sap/cds');
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const { s4Get } = require('./_lib/s4.client');
 const { getQueryOptions, pickODataOptions, applyLocalFilter, applyLocalPaging } = require('./_lib/odata.util');
+
 const MAX_VH_CONTEXT_CHARS = Number(process.env.MDG_VH_MAX_CONTEXT_CHARS || 4000);
+const S4_DESTINATION_NAME = process.env.MDG_S4_DESTINATION || 'S4H-TECH';
+const FAIL_FAST_ON_VH_METADATA = String(process.env.MDG_VH_FAIL_FAST || 'false').toLowerCase() === 'true';
 
-/*
-  Driver VH mapping (CAP -> S/4):
-  VH_DriverGen -> ZCDS_CONDUCTORES_GEN_CDS / zcds_conductores_gen
-  VH_DriverRol -> ZCDS_CONDUCTORES_ROL_CDS / zcds_conductores_rol
-  VH_DriverCom -> ZCDS_CONDUCTORES_COM_CDS / zcds_conductores_com
-  VH_DriverImp -> ZCDS_CONDUCTORES_IMP_CDS / zcds_conductores_imp
-  VH_DriverNif -> ZCDS_CONDUCTORES_NIF_CDS / zcds_conductores_nif
-  VH_DriverAdi -> ZCDS_CONDUCTORES_ADI_CDS / zcds_conductores_adi
-
-  Billing/Shipping/Resources VH mapping (CAP -> S/4):
-  VH_BillToGen -> ZCDS_DESTFACT_GEN_CDS / zcds_destfact_gen
-  VH_BillToCom -> ZCDS_DESTFACT_COM_CDS / zcds_destfact_com
-  VH_BillToImp -> ZCDS_DESTFACT_IMP_CDS / zcds_destfact_imp
-  VH_ShipToGen -> ZCDS_DESTMERC_GEN_CDS / zcds_destmerc_gen
-  VH_ShipToCom -> ZCDS_DESTMERC_COM_CDS / zcds_destmerc_com
-  VH_Resources -> ZCDS_RECURSOS_CDS / zcds_recursos
-*/
-
-// Stable mapping of CAP VH_* entitysets -> S/4 OData services/entity sets
-const VH_MAP = {
-  VH_CustomerGen:  {
-    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
-    entitySet: 'I_BusinessPartner',
-    keyField: 'Kunnr',
-    fieldCode: 'KNA1.KUNNR',
-    filterMode: 'local',
-    searchFields: ['Kunnr', 'Name1']
-  },
-  VH_CustomerClassification: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS', entitySet: 'I_CustomerClassification', keyField: 'CustomerClassification', searchFields: ['CustomerClassification', 'CustomerClassification_Text'], filterMode: 'local' },
-  VH_MaterialProduct: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-    entitySet: 'I_Material',
-    keyField: 'Material',
-    fieldCode: 'MVKE.PRODUCT',
-    searchFields: ['Material', 'Material_Text']
-  },
-  VH_MaterialSalesOrg: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-    entitySet: 'I_SalesOrganization',
-    keyField: 'SalesOrganization',
-    fieldCode: 'MVKE.VKORG',
-    searchFields: ['SalesOrganization', 'SalesOrganization_Text']
-  },
-  VH_MaterialVtweg: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-    entitySet: 'I_DistributionChainCountry',
-    keyField: 'ProductDistributionChnl',
-    fieldCode: 'MVKE.VTWEG',
-    searchFields: ['ProductDistributionChnl', 'ProductDistributionChnl_Text', 'ProductSalesOrg']
-  },
-  VH_MaterialKtgrm: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-    entitySet: 'Z_I_MatAccountAssignment_VH',
-    keyField: 'AcctAssignmentGroup',
-    fieldCode: 'MVKE.KTGRM',
-    searchFields: ['AcctAssignmentGroup', 'Description']
-  },
-  VH_CustomerOrgV: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_SalesOrganization', syntheticKey: true, keyParts: ['Vkorg'], fieldCode: 'KNVV.VKORG' },
-  VH_CustomerVtweg: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_DistributionChainCountry', syntheticKey: true, keyParts: ['Vkorg', 'Vtweg'], fieldCode: 'KNVV.VTWEG' },
-  VH_CustomerSpart: { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_ORGV_CDS', entitySet: 'I_Division', syntheticKey: true, keyParts: ['Spart'], fieldCode: 'KNVV.SPART' },
-  VH_CustomerLzone: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
-    entitySet: 'I_TransportationZoneDescVH',
-    keyField: 'TransportZone',
-    fieldCode: 'KNA1.LZONE',
-    searchFields: ['TransportZone', 'TransportZoneDescription', 'CountryCode', 'TransportZone_Text']
-  },
-  VH_CustomerRegion: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS',
-    entitySet: 'I_Region',
-    keyField: 'Region',
-    fieldCode: 'KNA1.REGION',
-    searchFields: ['Region', 'Region_Text', 'ProvincialTaxCode']
-  },
-  VH_CustomerPaymentCondition: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',
-    entitySet: 'I_PaymentCondition',
-    keyField: 'PaymentCondition',
-    fieldCode: 'KNVV.ZTERM',
-    searchFields: ['PaymentCondition', 'PaymentCondition_Text', 'PaymentTerms']
-  },
-  VH_CustomerBzirk: {
-    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',
-    entitySet: 'I_SalesDistrict',
-    entitySetCandidates: ['I_SalesDistrict', 'I_SalesDistrictVH'],
-    keyField: 'SalesDistrict',
-    fieldCode: 'KNVV.BZIRK',
-    searchFields: ['SalesDistrict', 'SalesDistrict_Text']
-  },
-  VH_CustomerSoc:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_SOC_CDS',  entitySet: 'I_CompanyCode', syntheticKey: true, keyParts: ['Bukrs', 'Maber'] },
-  VH_CustomerCom:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_COM_CDS',  entitySet: 'ZCDS_CLIENTES_COM', syntheticKey: true, keyParts: ['Kunnr', 'Parnr'] },
-  VH_CustomerEmp:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_EMP_CDS',  entitySet: 'zcds_clientes_emp', syntheticKey: true, keyParts: ['Kunnr', 'Bukrs', 'Ekorg', 'Vkorg'] },
-  VH_CustomerBan:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_BAN_CDS',  entitySet: 'zcds_clientes_ban', syntheticKey: true, keyParts: ['Kunnr', 'Banks', 'Bankl', 'Bankn'] },
-  VH_CustomerImp:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_IMP_CDS',  entitySet: 'zcds_clientes_Imp', syntheticKey: true, keyParts: ['Kunnr', 'Aland', 'Tatyp'] },
-  VH_CustomerNif:  { servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_NIF_CDS',  entitySet: 'zcds_clientes_nif', syntheticKey: true, keyParts: ['Kunnr', 'Taxtype'] },
-  VH_DriverGen:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_GEN_CDS', entitySet: 'zcds_conductores_gen', keyField: 'Kunnr' },
-  VH_DriverRol:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_ROL_CDS', entitySet: 'zcds_conductores_rol', syntheticKey: true, keyParts: ['Kunnr', 'Bp_Role', 'Dfval'] },
-  VH_DriverCom:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_COM_CDS', entitySet: 'zcds_conductores_com', syntheticKey: true, keyParts: ['Kunnr', 'Vkorg', 'Vtweg', 'Spart'] },
-  VH_DriverImp:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_IMP_CDS', entitySet: 'zcds_conductores_imp', syntheticKey: true, keyParts: ['Kunnr', 'Aland', 'Tatyp'] },
-  VH_DriverNif:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_NIF_CDS', entitySet: 'zcds_conductores_nif', syntheticKey: true, keyParts: ['Kunnr', 'Taxtype'] },
-  VH_DriverAdi:    { servicePath: '/sap/opu/odata/sap/ZCDS_CONDUCTORES_ADI_CDS', entitySet: 'zcds_conductores_adi', keyField: 'Kunnr' },
-  VH_BillToGen:    { servicePath: '/sap/opu/odata/sap/ZCDS_DESTFACT_GEN_CDS', entitySet: 'zcds_destfact_gen', keyField: 'Kunnr' },
-  VH_BillToCom:    { servicePath: '/sap/opu/odata/sap/ZCDS_DESTFACT_COM_CDS', entitySet: 'zcds_destfact_com', syntheticKey: true, keyParts: ['Kunnr', 'Vkorg', 'Vtweg', 'Spart'] },
-  VH_BillToImp:    { servicePath: '/sap/opu/odata/sap/ZCDS_DESTFACT_IMP_CDS', entitySet: 'zcds_destfact_imp', syntheticKey: true, keyParts: ['Kunnr', 'Aland', 'Tatyp'] },
-  VH_ShipToGen:    { servicePath: '/sap/opu/odata/sap/ZCDS_DESTMERC_GEN_CDS', entitySet: 'zcds_destmerc_gen', keyField: 'Kunnr' },
-  VH_ShipToCom:    { servicePath: '/sap/opu/odata/sap/ZCDS_DESTMERC_COM_CDS', entitySet: 'zcds_destmerc_com', syntheticKey: true, keyParts: ['Kunnr', 'Vkorg', 'Vtweg', 'Spart'] },
-  VH_Resources:    { servicePath: '/sap/opu/odata/sap/ZCDS_RECURSOS_CDS', entitySet: 'zcds_recursos', syntheticKey: true, keyParts: ['Resuid', 'Simversid', 'Simsessid'] }
-};
-
-function toSyntheticId(row, keyParts = [], idx = 0) {
-  const raw = keyParts.map((k) => String(row?.[k] ?? '').trim()).join('|') || String(idx + 1);
-  return String(raw).slice(0, 200);
-}
-
-function dedupeRows(rows, identityFn) {
-  const out = [];
-  const seen = new Set();
-  for (const row of rows || []) {
-    const key = identityFn(row);
-    if (!key) {
-      out.push(row);
-      continue;
-    }
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(row);
-  }
-  return out;
-}
-
-function mapCustomerGenRows(rows) {
-  return (rows || []).map((row) => {
-    const kunnr = String(
-      row?.Kunnr ??
-      row?.BusinessPartner ??
-      row?.Partner ??
-      ''
-    ).trim();
-    const name1 = String(
-      row?.Name1 ??
-      row?.BusinessPartnerName ??
-      row?.OrganizationBPName1 ??
-      ''
-    ).trim();
-    const partner = String(row?.Partner ?? row?.BusinessPartner ?? kunnr).trim();
-    return {
-      Kunnr: kunnr,
-      Partner: partner,
-      Name1: name1
-    };
-  }).filter((row) => row.Kunnr);
-}
-
-function _translateCustomerGenFilterToRemote(filterExpr) {
-  let src = String(filterExpr || '').trim();
-  if (!src) return '';
-  // Normalize contains(...) to OData V2 substringof(...), keeping field/value order.
-  src = src.replace(/contains\(\s*([A-Za-z0-9_]+)\s*,\s*'((?:''|[^'])*)'\s*\)/gi, "substringof('$2',$1)");
-  src = src.replace(/contains\(\s*'((?:''|[^'])*)'\s*,\s*([A-Za-z0-9_]+)\s*\)/gi, "substringof('$1',$2)");
-  return src
-    .replace(/\bKunnr\b/g, 'BusinessPartner')
-    .replace(/\bPartner\b/g, 'BusinessPartner')
-    .replace(/\bName1\b/g, 'BusinessPartnerName');
-}
-
-function _translateCustomerGenSelectToRemote(selectExpr) {
-  const parts = String(selectExpr || '')
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  if (!parts.length) return undefined;
-
-  const mapped = parts.map((p) => {
-    if (p === 'Kunnr' || p === 'Partner') return 'BusinessPartner';
-    if (p === 'Name1') return 'BusinessPartnerName';
-    return p;
-  });
-  return Array.from(new Set(mapped)).join(',');
-}
-
-async function _fetchCustomerGenLocalWindow({ cfg, baseRemoteQuery, localFilter, localSearch, localTop, localSkip }) {
-  const target = Math.max(Number(localSkip || 0), 0) + Math.max(Number(localTop || 0), 0);
-  const batchSize = 500;
-  const maxScan = 0; // 0 => no hard cap (prioritize correctness for VH search)
-  let scanned = 0;
-  let offset = 0;
-  let aggregated = [];
-  const exhaustiveSearch = Boolean(localFilter || localSearch);
-
-  while ((exhaustiveSearch || aggregated.length < target) && (!maxScan || scanned < maxScan)) {
-    const q = { ...baseRemoteQuery, $top: batchSize, $skip: offset };
-    // Safety net: never propagate unsupported contains(...) to S/4.
-    if (q.$filter && /contains\s*\(/i.test(String(q.$filter))) {
-      delete q.$filter;
-    }
-    const remoteRows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: q });
-    if (!remoteRows.length) break;
-
-    let rows = mapCustomerGenRows(remoteRows);
-    if (localFilter) rows = applyLocalFilter(rows, localFilter);
-    if (localSearch) rows = applyLocalSearch(rows, localSearch, cfg.searchFields || ['Kunnr', 'Name1']);
-    aggregated = aggregated.concat(rows);
-
-    scanned += remoteRows.length;
-    offset += remoteRows.length;
-    if (remoteRows.length < batchSize) break;
-  }
-
-  if (maxScan && scanned >= maxScan) {
-    console.warn(`[VH_CustomerGen] local fallback reached scan cap ${maxScan}`);
-  }
-  return applyLocalPaging(aggregated, localTop, localSkip);
-}
-
-function _extractEqValue(filterExpr, fieldName) {
-  const f = String(filterExpr || '');
-  const re = new RegExp(`${fieldName}\\s+eq\\s+'((?:''|[^'])*)'`, 'i');
-  const m = f.match(re);
-  if (!m) return null;
-  return String(m[1]).replace(/''/g, "'");
-}
+const _metadataEntitySetCache = new Map();
+const _vhInvalidMappings = new Map();
 
 function _escapeODataLiteral(value) {
   return String(value ?? '').replace(/'/g, "''");
 }
 
-function _isRemoteSegmentNotFoundError(err) {
-  const message = String(err?.message || err?.response?.data?.error?.message?.value || '').toLowerCase();
-  return message.includes('resource not found for the segment');
+function _isEmptyValue(value) {
+  return value === undefined || value === null || String(value).trim() === '';
 }
 
-async function _s4GetWithEntityFallback(cfg, query) {
-  const candidates = Array.from(
-    new Set([cfg?.entitySet].concat(cfg?.entitySetCandidates || []).filter(Boolean))
-  );
-  let lastError;
+function _toCsvArray(value) {
+  return String(value || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
 
-  for (const entitySet of candidates) {
-    try {
-      return await s4Get({ servicePath: cfg.servicePath, entitySet, query });
-    } catch (err) {
-      lastError = err;
-      if (!_isRemoteSegmentNotFoundError(err)) {
-        throw err;
-      }
-    }
+function _hasFieldCaseInsensitive(row, fieldName) {
+  if (!row || !fieldName) return false;
+  if (Object.prototype.hasOwnProperty.call(row, fieldName)) return true;
+  const lower = String(fieldName).toLowerCase();
+  return Object.keys(row).some((k) => String(k).toLowerCase() === lower);
+}
+
+function _extractEntitySetNamesFromMetadata(xml) {
+  const out = new Set();
+  const text = String(xml || '');
+  const regex = /<EntitySet[^>]*Name="([^"]+)"/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    if (match?.[1]) out.add(String(match[1]).trim());
   }
+  return out;
+}
 
-  throw lastError || new Error('No valid entity set candidate configured for value help');
+async function _fetchMetadataEntitySets(servicePath) {
+  const normalizedPath = String(servicePath || '').trim().replace(/\/+$/, '');
+  const cacheKey = normalizedPath;
+  if (_metadataEntitySetCache.has(cacheKey)) return _metadataEntitySetCache.get(cacheKey);
+
+  const url = `${normalizedPath}/$metadata`;
+  const response = await executeHttpRequest(
+    { destinationName: S4_DESTINATION_NAME },
+    {
+      method: 'GET',
+      url,
+      headers: { Accept: 'application/xml, text/xml, application/atom+xml, */*' }
+    }
+  );
+
+  const xml =
+    typeof response?.data === 'string'
+      ? response.data
+      : Buffer.isBuffer(response?.data)
+        ? response.data.toString('utf8')
+        : String(response?.data || '');
+  const entitySets = _extractEntitySetNamesFromMetadata(xml);
+  _metadataEntitySetCache.set(cacheKey, entitySets);
+  return entitySets;
+}
+
+function _vhConfigError(vhName, reason, details = {}) {
+  const error = new Error(`Value help mapping error for ${vhName}: ${reason}`);
+  error.statusCode = 500;
+  error.code = 'VH_CONFIG_ERROR';
+  // cds runtime expects `err.details` to be iterable (array of detail objects).
+  const isIterable = details && typeof details !== 'string' && typeof details[Symbol.iterator] === 'function';
+  if (Array.isArray(details)) {
+    error.details = details;
+  } else if (isIterable) {
+    error.details = Array.from(details);
+  } else if (details && Object.keys(details).length) {
+    error.details = [
+      {
+        code: 'VH_CONFIG_ERROR',
+        message: `Value help mapping error for ${vhName}: ${reason}`,
+        target: `/${vhName}`,
+        ...details
+      }
+    ];
+  } else {
+    error.details = [];
+  }
+  return error;
 }
 
 function _getContextInput(req, q) {
@@ -278,117 +118,101 @@ function _getContextInput(req, q) {
   }
 }
 
-function _findContextValue(contextMap, key) {
-  if (!contextMap || !key) return null;
-  if (contextMap[key] !== undefined && contextMap[key] !== null) {
-    const exact = String(contextMap[key]).trim();
-    if (exact !== '') return exact;
+function _findContextEntry(contextMap, key) {
+  if (!contextMap || !key) return { found: false, value: null };
+  if (Object.prototype.hasOwnProperty.call(contextMap, key)) {
+    const raw = contextMap[key];
+    if (raw === undefined || raw === null) return { found: true, value: '' };
+    return { found: true, value: String(raw).trim() };
   }
   const keyLower = String(key).toLowerCase();
   for (const [ctxKey, ctxValue] of Object.entries(contextMap)) {
     if (String(ctxKey).toLowerCase() !== keyLower) continue;
-    if (ctxValue === undefined || ctxValue === null) continue;
-    const normalized = String(ctxValue).trim();
-    if (normalized !== '') return normalized;
+    if (ctxValue === undefined || ctxValue === null) return { found: true, value: '' };
+    return { found: true, value: String(ctxValue).trim() };
   }
-  return null;
+  return { found: false, value: null };
 }
 
 function _getRequestIdInput(req, q) {
   return String(
     req?.data?.requestId ??
-    req?.data?.REQUEST_ID ??
-    q?.requestId ??
-    q?.REQUEST_ID ??
-    req?._?.query?.requestId ??
-    req?._?.query?.REQUEST_ID ??
-    req?._?.req?.query?.requestId ??
-    req?._?.req?.query?.REQUEST_ID ??
-    req?.req?.query?.requestId ??
-    req?.req?.query?.REQUEST_ID ??
-    ''
+      req?.data?.REQUEST_ID ??
+      q?.requestId ??
+      q?.REQUEST_ID ??
+      req?._?.query?.requestId ??
+      req?._?.query?.REQUEST_ID ??
+      req?._?.req?.query?.requestId ??
+      req?._?.req?.query?.REQUEST_ID ??
+      req?.req?.query?.requestId ??
+      req?.req?.query?.REQUEST_ID ??
+      ''
   ).trim();
 }
 
 function _getFieldCodeInput(req, q) {
   return String(
     req?.data?.fieldCode ??
-    req?.data?.FIELD_CODE ??
-    q?.fieldCode ??
-    q?.FIELD_CODE ??
-    req?._?.query?.fieldCode ??
-    req?._?.query?.FIELD_CODE ??
-    req?._?.req?.query?.fieldCode ??
-    req?._?.req?.query?.FIELD_CODE ??
-    req?.req?.query?.fieldCode ??
-    req?.req?.query?.FIELD_CODE ??
-    ''
+      req?.data?.FIELD_CODE ??
+      q?.fieldCode ??
+      q?.FIELD_CODE ??
+      req?._?.query?.fieldCode ??
+      req?._?.query?.FIELD_CODE ??
+      req?._?.req?.query?.fieldCode ??
+      req?._?.req?.query?.FIELD_CODE ??
+      req?.req?.query?.fieldCode ??
+      req?.req?.query?.FIELD_CODE ??
+      ''
   ).trim();
 }
 
-function _extractFieldHintsFromQuery(q) {
-  const hints = new Set();
-  const selectParts = String(q?.$select || '')
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-  for (const part of selectParts) hints.add(part.toLowerCase());
-
-  const filter = String(q?.$filter || '');
-  const fieldRegex = /\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:eq|ne|gt|ge|lt|le)\b/g;
-  let m;
-  while ((m = fieldRegex.exec(filter)) !== null) {
-    if (m?.[1]) hints.add(String(m[1]).toLowerCase());
-  }
-  return hints;
+function _getFieldIdInput(req, q) {
+  return String(
+    req?.data?.fieldId ??
+      req?.data?.FIELD_ID ??
+      q?.fieldId ??
+      q?.FIELD_ID ??
+      req?._?.query?.fieldId ??
+      req?._?.query?.FIELD_ID ??
+      req?._?.req?.query?.fieldId ??
+      req?._?.req?.query?.FIELD_ID ??
+      req?.req?.query?.fieldId ??
+      req?.req?.query?.FIELD_ID ??
+      ''
+  ).trim();
 }
 
-function _resolveFieldCodeByQueryHints(fieldCodes, q) {
-  const hints = _extractFieldHintsFromQuery(q);
-  if (!hints.size) return '';
-  for (const fieldCode of fieldCodes || []) {
-    const suffix = String(fieldCode || '').split('.').pop();
-    if (!suffix) continue;
-    if (hints.has(String(suffix).toLowerCase())) return fieldCode;
-  }
-  return '';
+function _getBlockIdInput(req, q) {
+  return String(
+    req?.data?.blockId ??
+      req?.data?.BLOCK_ID ??
+      q?.blockId ??
+      q?.BLOCK_ID ??
+      req?._?.query?.blockId ??
+      req?._?.query?.BLOCK_ID ??
+      req?._?.req?.query?.blockId ??
+      req?._?.req?.query?.BLOCK_ID ??
+      req?.req?.query?.blockId ??
+      req?.req?.query?.BLOCK_ID ??
+      ''
+  ).trim();
 }
 
-async function _getVhFieldCodes(tx, vhName) {
-  if (!vhName) return [];
-  const rows = await tx.run(
-    `SELECT "FIELD_CODE"
-       FROM "MDG_FIELD_CATALOG"
-      WHERE "VH_SERVICE" = 'CAP'
-        AND "VH_ENTITYSET" = ?`,
-    [vhName]
-  );
-  return (rows || [])
-    .map((row) => String(row.FIELD_CODE || '').trim())
-    .filter(Boolean);
-}
-
-async function _loadVhDependencies(tx, fieldCode) {
-  if (!fieldCode) return [];
-  try {
-    return await tx.run(
-      `SELECT
-          "FIELD_CODE",
-          "DEPENDS_ON_FIELD_CODE",
-          "VH_PROPERTY_NAME",
-          "REQUIRED",
-          "EVALUATION_ORDER",
-          "IS_ACTIVE"
-         FROM "MDG_FIELD_VH_DEPENDENCY"
-        WHERE "FIELD_CODE" = ?
-          AND "IS_ACTIVE" = true
-        ORDER BY "EVALUATION_ORDER" ASC`,
-      [fieldCode]
-    );
-  } catch (_) {
-    // Backward compatible path if dependency table not present in a landscape.
-    return [];
-  }
+function _getProcessCodeInput(req, q) {
+  const raw = String(
+    req?.data?.processCode ??
+      req?.data?.PROCESS_CODE ??
+      q?.processCode ??
+      q?.PROCESS_CODE ??
+      req?._?.query?.processCode ??
+      req?._?.query?.PROCESS_CODE ??
+      req?._?.req?.query?.processCode ??
+      req?._?.req?.query?.PROCESS_CODE ??
+      req?.req?.query?.processCode ??
+      req?.req?.query?.PROCESS_CODE ??
+      ''
+  ).trim();
+  return raw.replace(/^'+|'+$/g, '');
 }
 
 async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
@@ -405,38 +229,343 @@ async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
     [requestId, fieldCode]
   );
   const value = rows?.[0]?.VALUE;
-  return value === undefined || value === null ? null : String(value).trim();
+  return _isEmptyValue(value) ? null : String(value).trim();
 }
 
-async function _resolveDependencyValue(tx, req, q, dep, contextMap, requestId) {
+function _normalizeCatalogRow(row) {
+  if (!row) return null;
+  return {
+    FIELD_ID: String(row.FIELD_ID ?? row.ID ?? '').trim(),
+    FIELD_CODE: String(row.FIELD_CODE || '').trim(),
+    VH_ENTITYSET: String(row.VH_ENTITYSET || '').trim(),
+    VH_KEY_FIELD: String(row.VH_KEY_FIELD || '').trim(),
+    VH_TEXT_FIELD: String(row.VH_TEXT_FIELD || '').trim(),
+    VH_SEARCH_FIELDS: String(row.VH_SEARCH_FIELDS || '').trim()
+  };
+}
+
+function _ensureCatalogRowMatchesRequestedVh(row, vhName, input = {}) {
+  const actualVh = String(row?.VH_ENTITYSET || '').trim();
+  if (actualVh && actualVh !== vhName) {
+    throw _vhConfigError(
+      vhName,
+      `${input.fieldId ? `fieldId '${input.fieldId}'` : `fieldCode '${input.fieldCode || ''}'`} resolved to vhEntitySet '${actualVh}', expected '${vhName}'`,
+      {
+        ...input,
+        expectedVhEntitySet: vhName,
+        actualVhEntitySet: actualVh,
+        resolvedFieldId: row?.FIELD_ID || '',
+        resolvedFieldCode: row?.FIELD_CODE || ''
+      }
+    );
+  }
+}
+
+function _logCatalogResolution(vhName, input = {}, source = '', row = null) {
+  console.info(
+    `[VH_RESOLVE] vhEntitySet=${vhName} input=${JSON.stringify({
+      fieldId: input.fieldId || '',
+      fieldCode: input.fieldCode || '',
+      requestId: input.requestId || '',
+      blockId: input.blockId || '',
+      processCode: input.processCode || ''
+    })} source=${source} resolved=${JSON.stringify({
+      fieldId: row?.FIELD_ID || '',
+      fieldCode: row?.FIELD_CODE || '',
+      vhEntitySet: row?.VH_ENTITYSET || '',
+      vhKeyField: row?.VH_KEY_FIELD || '',
+      vhTextField: row?.VH_TEXT_FIELD || ''
+    })}`
+  );
+}
+
+async function _loadCatalogRuntime(tx, vhName, input = {}) {
+  const fieldId = String(input.fieldId || '').trim();
+  const fieldCode = String(input.fieldCode || '').trim();
+  const requestId = String(input.requestId || '').trim();
+  const blockId = String(input.blockId || '').trim();
+  const processCode = String(input.processCode || '').trim();
+
+  if (fieldId) {
+    const byFieldId = await tx.run(
+      `SELECT
+         "ID"            as "FIELD_ID",
+         "FIELD_CODE",
+         "VH_ENTITYSET",
+         "VH_KEY_FIELD",
+         "VH_TEXT_FIELD",
+         "VH_SEARCH_FIELDS"
+       FROM "MDG_FIELD_CATALOG"
+      WHERE "ID" = ?
+        AND "VH_SERVICE" = 'CAP'
+      LIMIT 1`,
+      [fieldId]
+    );
+    const row = _normalizeCatalogRow(byFieldId?.[0]);
+    if (row) {
+      _ensureCatalogRowMatchesRequestedVh(row, vhName, input);
+      _logCatalogResolution(vhName, input, 'fieldId', row);
+      return row;
+    }
+  }
+
+  if (requestId && fieldCode) {
+    let sql =
+      `SELECT DISTINCT
+         fc."ID"             as "FIELD_ID",
+         fc."FIELD_CODE"     as "FIELD_CODE",
+         fc."VH_ENTITYSET"   as "VH_ENTITYSET",
+         fc."VH_KEY_FIELD"   as "VH_KEY_FIELD",
+         fc."VH_TEXT_FIELD"  as "VH_TEXT_FIELD",
+         fc."VH_SEARCH_FIELDS" as "VH_SEARCH_FIELDS"
+       FROM "MDG_REQUEST_HEADER" rh
+       JOIN "MDG_PROCESS_BLOCK" pb
+         ON pb."PROCESS_ID" = rh."PROCESS_ID"
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = bf."FIELD_ID"
+      WHERE rh."ID" = ?
+        AND fc."FIELD_CODE" = ?
+        AND fc."VH_SERVICE" = 'CAP'`;
+    const params = [requestId, fieldCode];
+    if (blockId) {
+      sql += ` AND bf."BLOCK_ID" = ?`;
+      params.push(blockId);
+    }
+    sql += ` ORDER BY fc."ID" ASC`;
+    const rows = (await tx.run(sql, params)).map(_normalizeCatalogRow).filter(Boolean);
+
+    const exact = rows.filter((r) => r.VH_ENTITYSET === vhName);
+    if (exact.length === 1) {
+      _logCatalogResolution(vhName, input, 'requestContext', exact[0]);
+      return exact[0];
+    }
+    if (exact.length > 1) {
+      throw _vhConfigError(vhName, `ambiguous fieldCode '${fieldCode}' for request context`, {
+        ...input,
+        errorCode: 'AMBIGUOUS_FIELD_CODE',
+        candidates: exact.map((r) => ({ fieldId: r.FIELD_ID, fieldCode: r.FIELD_CODE, vhEntitySet: r.VH_ENTITYSET }))
+      });
+    }
+  }
+
+  if (processCode && fieldCode) {
+    const rows = await tx.run(
+      `SELECT DISTINCT
+         fc."ID"             as "FIELD_ID",
+         fc."FIELD_CODE"     as "FIELD_CODE",
+         fc."VH_ENTITYSET"   as "VH_ENTITYSET",
+         fc."VH_KEY_FIELD"   as "VH_KEY_FIELD",
+         fc."VH_TEXT_FIELD"  as "VH_TEXT_FIELD",
+         fc."VH_SEARCH_FIELDS" as "VH_SEARCH_FIELDS"
+       FROM "MDG_PROCESS" p
+       JOIN "MDG_PROCESS_BLOCK" pb
+         ON pb."PROCESS_ID" = p."ID"
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = bf."FIELD_ID"
+      WHERE p."PROCESS_CODE" = ?
+        AND fc."FIELD_CODE" = ?
+        AND fc."VH_SERVICE" = 'CAP'
+      ORDER BY fc."ID" ASC`,
+      [processCode, fieldCode]
+    );
+    const normalized = (rows || []).map(_normalizeCatalogRow).filter(Boolean);
+    const exact = normalized.filter((r) => r.VH_ENTITYSET === vhName);
+    if (exact.length === 1) {
+      _logCatalogResolution(vhName, input, 'processCode', exact[0]);
+      return exact[0];
+    }
+  }
+
+  if (fieldCode) {
+    const byFieldCode = await tx.run(
+      `SELECT
+         "ID"            as "FIELD_ID",
+         "FIELD_CODE",
+         "VH_ENTITYSET",
+         "VH_KEY_FIELD",
+         "VH_TEXT_FIELD",
+         "VH_SEARCH_FIELDS"
+       FROM "MDG_FIELD_CATALOG"
+      WHERE "FIELD_CODE" = ?
+        AND "VH_SERVICE" = 'CAP'
+      ORDER BY "ID" ASC`,
+      [fieldCode]
+    );
+    const rows = (byFieldCode || []).map(_normalizeCatalogRow).filter(Boolean);
+    if (rows.length > 1) {
+      const exact = rows.filter((r) => r.VH_ENTITYSET === vhName);
+      if (exact.length === 1) {
+        _logCatalogResolution(vhName, input, 'fieldCode+vh', exact[0]);
+        return exact[0];
+      }
+      throw _vhConfigError(vhName, `ambiguous fieldCode '${fieldCode}' without context`, {
+        ...input,
+        errorCode: 'AMBIGUOUS_FIELD_CODE',
+        candidates: rows.map((r) => ({ fieldId: r.FIELD_ID, fieldCode: r.FIELD_CODE, vhEntitySet: r.VH_ENTITYSET }))
+      });
+    }
+    if (rows[0]) {
+      _ensureCatalogRowMatchesRequestedVh(rows[0], vhName, input);
+      _logCatalogResolution(vhName, input, 'fieldCode', rows[0]);
+      return rows[0];
+    }
+  }
+
+  const byVh = await tx.run(
+    `SELECT
+       "ID"            as "FIELD_ID",
+       "FIELD_CODE",
+       "VH_ENTITYSET",
+       "VH_KEY_FIELD",
+       "VH_TEXT_FIELD",
+       "VH_SEARCH_FIELDS"
+     FROM "MDG_FIELD_CATALOG"
+    WHERE "VH_SERVICE" = 'CAP'
+      AND "VH_ENTITYSET" = ?
+    ORDER BY "FIELD_CODE" ASC
+    LIMIT 1`,
+    [vhName]
+  );
+
+  const row = _normalizeCatalogRow(byVh?.[0]);
+  if (!row) {
+    throw _vhConfigError(vhName, 'no MDG_FIELD_CATALOG entry found', input);
+  }
+  _logCatalogResolution(vhName, input, 'vhEntitySet', row);
+  return row;
+}
+
+async function _loadRouteRuntime(tx, vhName) {
+  const sqlActive =
+    `SELECT
+       "VH_ENTITYSET",
+       "DESTINATION_NAME",
+       "SERVICE_PATH",
+       "REMOTE_ENTITYSET",
+       "REMOTE_KEY_FIELD",
+       "REMOTE_TEXT_FIELD",
+       "REMOTE_SEARCH_FIELDS"
+     FROM "MDG_VH_ROUTE"
+    WHERE "VH_ENTITYSET" = ?
+      AND "IS_ENABLED" = true
+    ORDER BY "VH_ENTITYSET" ASC
+    LIMIT 1`;
+
+  const sqlPlain =
+    `SELECT
+       "VH_ENTITYSET",
+       "DESTINATION_NAME",
+       "SERVICE_PATH",
+       "REMOTE_ENTITYSET",
+       "REMOTE_KEY_FIELD",
+       "REMOTE_TEXT_FIELD",
+       "REMOTE_SEARCH_FIELDS"
+     FROM "MDG_VH_ROUTE"
+    WHERE "VH_ENTITYSET" = ?
+    ORDER BY "VH_ENTITYSET" ASC
+    LIMIT 1`;
+
+  let rows = [];
+  try {
+    rows = await tx.run(sqlActive, [vhName]);
+  } catch (_) {
+    rows = await tx.run(sqlPlain, [vhName]);
+  }
+
+  if (!rows?.[0]) {
+    throw _vhConfigError(vhName, 'no active MDG_VH_ROUTE mapping found', { vhEntitySet: vhName });
+  }
+
+  const route = rows[0];
+  if (!String(route.SERVICE_PATH || '').trim() || !String(route.REMOTE_ENTITYSET || '').trim()) {
+    throw _vhConfigError(vhName, 'invalid MDG_VH_ROUTE mapping (missing SERVICE_PATH or REMOTE_ENTITYSET)', {
+      vhEntitySet: vhName,
+      servicePath: route.SERVICE_PATH,
+      remoteEntitySet: route.REMOTE_ENTITYSET
+    });
+  }
+
+  return route;
+}
+
+async function _validateRouteEntitySet(vhName, route) {
+  const servicePath = String(route.SERVICE_PATH || '').trim();
+  const remoteEntitySet = String(route.REMOTE_ENTITYSET || '').trim();
+
+  const entitySets = await _fetchMetadataEntitySets(servicePath);
+  if (!entitySets.has(remoteEntitySet)) {
+    throw _vhConfigError(vhName, `entitySet '${remoteEntitySet}' not found in metadata '${servicePath}'`, {
+      vhEntitySet: vhName,
+      servicePath,
+      remoteEntitySet
+    });
+  }
+}
+
+async function _loadVhDependencies(tx, fieldCode) {
+  if (!fieldCode) return [];
+  try {
+    const rows = await tx.run(
+      `SELECT
+         "FIELD_CODE",
+         "DEPENDS_ON_FIELD_CODE",
+         "VH_PROPERTY_NAME",
+         "IS_REQUIRED" as "REQUIRED",
+         "EVALUATION_ORDER",
+         "IS_ENABLED" as "IS_ACTIVE"
+       FROM "MDG_FIELD_VH_DEPENDENCY"
+      WHERE "FIELD_CODE" = ?
+        AND "IS_ENABLED" = true
+      ORDER BY "EVALUATION_ORDER" ASC`,
+      [fieldCode]
+    );
+    return rows;
+  } catch (_) {
+    try {
+      return await tx.run(
+      `SELECT
+         "FIELD_CODE",
+         "DEPENDS_ON_FIELD_CODE",
+         "VH_PROPERTY_NAME",
+         "REQUIRED",
+         "EVALUATION_ORDER",
+         "IS_ACTIVE"
+       FROM "MDG_FIELD_VH_DEPENDENCY"
+      WHERE "FIELD_CODE" = ?
+        AND "IS_ACTIVE" = true
+      ORDER BY "EVALUATION_ORDER" ASC`,
+      [fieldCode]
+    );
+    } catch (_) {
+      return [];
+    }
+  }
+}
+
+async function _resolveDependencyValue(tx, dep, contextMap, requestId) {
   const depFieldCode = String(dep?.DEPENDS_ON_FIELD_CODE || '').trim();
   if (!depFieldCode) return { value: null, source: null };
 
-  const fromContext = _findContextValue(contextMap, depFieldCode);
-  if (fromContext) return { value: fromContext, source: 'context' };
+  const fromContextFull = _findContextEntry(contextMap, depFieldCode);
+  if (fromContextFull.found) return { value: fromContextFull.value, source: 'context' };
 
   const depSimple = depFieldCode.split('.').pop();
-  const fromSimpleContext = _findContextValue(contextMap, depSimple);
-  if (fromSimpleContext) return { value: fromSimpleContext, source: 'context' };
+  const fromContextSimple = _findContextEntry(contextMap, depSimple);
+  if (fromContextSimple.found) return { value: fromContextSimple.value, source: 'context' };
 
   const fromRequest = await _readRequestValueByFieldCode(tx, requestId, depFieldCode);
-  if (fromRequest) return { value: fromRequest, source: 'request' };
-
-  const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
-  if (vhPropertyName) {
-    const fromQueryFilter = _extractEqValue(q?.$filter, vhPropertyName);
-    if (fromQueryFilter) return { value: fromQueryFilter, source: 'query_filter' };
-  }
+  if (fromRequest) return { value: fromRequest, source: 'persisted' };
 
   return { value: null, source: null };
 }
 
 async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
-  const effectiveFieldCode = String(fieldCode || '').trim();
-  if (!effectiveFieldCode) return { missingRequired: false, dependencies: [] };
-
-  const deps = await _loadVhDependencies(tx, effectiveFieldCode);
-  if (!deps.length) return { missingRequired: false, dependencies: [] };
+  const deps = await _loadVhDependencies(tx, fieldCode);
+  if (!deps.length) return { missingRequired: false, resolvedDepLogs: [] };
 
   const contextMap = _getContextInput(req, q);
   const requestId = _getRequestIdInput(req, q);
@@ -445,7 +574,7 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
   const resolvedDepLogs = [];
 
   for (const dep of deps) {
-    const resolved = await _resolveDependencyValue(tx, req, q, dep, contextMap, requestId);
+    const resolved = await _resolveDependencyValue(tx, dep, contextMap, requestId);
     const value = resolved?.value;
     const vhPropertyName = String(dep?.VH_PROPERTY_NAME || '').trim();
     const isRequired = dep?.REQUIRED === true || String(dep?.REQUIRED).toLowerCase() === 'true' || dep?.REQUIRED === 1;
@@ -459,12 +588,12 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
       required: Boolean(isRequired)
     });
 
-    if (!value) {
-      if (isRequired) unresolvedRequired.push(String(dep?.DEPENDS_ON_FIELD_CODE || '').trim() || vhPropertyName || '?');
+    if (_isEmptyValue(value)) {
+      if (isRequired) unresolvedRequired.push(dependsOn || vhPropertyName || '?');
       continue;
     }
-    if (!vhPropertyName) continue;
 
+    if (!vhPropertyName) continue;
     depFilters.push(`${vhPropertyName} eq '${_escapeODataLiteral(value)}'`);
   }
 
@@ -472,336 +601,51 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
     remoteQ.$filter = remoteQ.$filter ? `(${remoteQ.$filter}) and (${depFilters.join(' and ')})` : depFilters.join(' and ');
   }
 
-  if (resolvedDepLogs.length) {
-    console.info(
-      `[VH_DEP_TRACE] vh=${vhName} fieldCode=${effectiveFieldCode} requestId=${requestId || '-'} deps=${JSON.stringify(resolvedDepLogs)} filter=${remoteQ.$filter || ''}`
-    );
-  }
-
   if (unresolvedRequired.length) {
-    console.warn(`[VH_DEP_MISSING] ${vhName} fieldCode=${effectiveFieldCode} missing=${unresolvedRequired.join(',')}`);
-    return { missingRequired: true, dependencies: deps };
-  }
-  return { missingRequired: false, dependencies: deps };
-}
-
-function mapCustomerOrgVRows(rows) {
-  return (rows || []).map((row) => ({
-    Kunnr: '',
-    Vkorg: String(row?.Vkorg ?? row?.SalesOrganization ?? '').trim(),
-    VkorgText: String(
-      row?.VkorgText ??
-      row?.SalesOrganizationName ??
-      row?.SalesOrganizationText ??
-      row?.SalesOrganization_Text ??
-      ''
-    ).trim(),
-    Vtweg: '',
-    VtwegText: '',
-    Spart: '',
-    SpartText: ''
-  })).filter((row) => row.Vkorg);
-}
-
-function mapCustomerVtwegRows(rows) {
-  return (rows || []).map((row) => ({
-    Vkorg: String(row?.Vkorg ?? row?.ProductSalesOrg ?? '').trim(),
-    VkorgText: String(
-      row?.VkorgText ??
-      row?.SalesOrganizationName ??
-      row?.SalesOrganizationText ??
-      row?.SalesOrganization_Text ??
-      ''
-    ).trim(),
-    Vtweg: String(row?.Vtweg ?? row?.ProductDistributionChnl ?? '').trim(),
-    VtwegText: String(
-      row?.VtwegText ??
-      row?.DistributionChannelName ??
-      row?.DistributionChannelText ??
-      row?.DistributionChannel_Text ??
-      row?.ProductDistributionChnl_Text ??
-      ''
-    ).trim()
-  })).filter((row) => row.Vkorg && row.Vtweg);
-}
-
-function mapCustomerSpartRows(rows) {
-  return (rows || []).map((row) => ({
-    Spart: String(row?.Spart ?? row?.Division ?? '').trim(),
-    SpartText: String(row?.SpartText ?? row?.DivisionName ?? row?.DivisionText ?? row?.Division_Text ?? '').trim(),
-    Division: String(row?.Division ?? row?.Spart ?? '').trim(),
-    Division_Text: String(row?.Division_Text ?? row?.DivisionName ?? row?.DivisionText ?? row?.SpartText ?? '').trim(),
-    DivisionOID: String(row?.DivisionOID ?? '').trim()
-  })).filter((row) => row.Spart);
-}
-
-function _toCsvSet(value) {
-  return new Set(
-    String(value || '')
-      .split(',')
-      .map((x) => x.trim())
-      .filter(Boolean)
-  );
-}
-
-function getCustomerSocMode(q) {
-  const selectSet = _toCsvSet(q?.$select);
-  const filter = String(q?.$filter || '').toLowerCase();
-  const bySelectMaber = selectSet.has('Maber') || selectSet.has('MaberText');
-  if (bySelectMaber || filter.includes('maber') || filter.includes('dunningarea')) return 'DUNNING_AREA';
-  return 'COMPANY_CODE';
-}
-
-function mapCustomerSocRows(rows, mode) {
-  if (mode === 'DUNNING_AREA') {
-    return (rows || []).map((row) => ({
-      Kunnr: '',
-      Bukrs: '',
-      BukrsText: '',
-      Maber: String(row?.Maber ?? row?.DunningArea ?? '').trim(),
-      MaberText: String(row?.MaberText ?? row?.DunningAreaName ?? row?.DunningAreaText ?? '').trim()
-    })).filter((row) => row.Maber);
-  }
-  return (rows || []).map((row) => ({
-    Kunnr: '',
-    Bukrs: String(row?.Bukrs ?? row?.CompanyCode ?? '').trim(),
-    BukrsText: String(row?.BukrsText ?? row?.CompanyCodeName ?? row?.CompanyCodeText ?? '').trim(),
-    Maber: '',
-    MaberText: ''
-  })).filter((row) => row.Bukrs);
-}
-
-async function readCustomerOrgV(req) {
-  const cfg = VH_MAP.VH_CustomerOrgV;
-  const tx = cds.tx(req);
-  const q = pickODataOptions(getQueryOptions(req));
-  if (q.$top === undefined) q.$top = 50;
-
-  const localFilter = q.$filter;
-  const localSearch = q.$search ?? q.search ?? q.q;
-  const localTop = q.$top;
-  const localSkip = q.$skip;
-  const remoteQ = { ...q };
-  // Local contract fields (Vkorg, VkorgText) differ from remote canonical names.
-  // Do not forward UI $select directly to S/4.
-  delete remoteQ.$select;
-  delete remoteQ.$filter;
-  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerOrgV', depFieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
-  if (localFilter || localSearch) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-    delete remoteQ.$search;
-    delete remoteQ.search;
-    delete remoteQ.q;
+    console.warn(`[VH_DEP_MISSING] vh=${vhName} fieldCode=${fieldCode || '-'} missing=${unresolvedRequired.join(',')}`);
+    return { missingRequired: true, resolvedDepLogs };
   }
 
-  let rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
-  rows = mapCustomerOrgVRows(rows);
-
-  if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = applyLocalSearch(rows, localSearch, ['Vkorg', 'VkorgText']);
-  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
-
-  const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
-  return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
+  return { missingRequired: false, resolvedDepLogs };
 }
 
-async function readCustomerGen(req) {
-  const cfg = VH_MAP.VH_CustomerGen;
-  const tx = cds.tx(req);
-  const q = pickODataOptions(getQueryOptions(req));
-  if (q.$top === undefined) q.$top = 50;
+function _validateCatalogRouteContract(vhName, catalog, route) {
+  const localKey = String(catalog?.VH_KEY_FIELD || '').trim();
+  const localText = String(catalog?.VH_TEXT_FIELD || '').trim();
 
-  const localFilter = q.$filter;
-  const localSearch = q.$search ?? q.search ?? q.q;
-  const localTop = q.$top;
-  const localSkip = q.$skip;
-  const remoteQ = { ...q };
-
-  // $search from UI is applied in CAP as local fallback for cross-backend compatibility.
-  delete remoteQ.$search;
-  delete remoteQ.search;
-  delete remoteQ.q;
-  // Never pass raw UI $filter (often contains/substringof over local field names) directly to S/4.
-  // We rebuild a safe translated filter after dependency resolution.
-  delete remoteQ.$filter;
-
-  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerGen', depFieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
-
-  const depFilterOnly = remoteQ.$filter ? String(remoteQ.$filter) : '';
-  const translatedFilter = _translateCustomerGenFilterToRemote(localFilter);
-  const safeRemoteFilter = translatedFilter && !/contains\s*\(/i.test(translatedFilter);
-  if (localFilter && safeRemoteFilter) {
-    remoteQ.$filter = depFilterOnly
-      ? `(${depFilterOnly}) and (${translatedFilter})`
-      : translatedFilter;
-  } else if (localFilter && depFilterOnly) {
-    remoteQ.$filter = depFilterOnly;
-  }
-
-  const translatedSelect = _translateCustomerGenSelectToRemote(q.$select);
-  if (translatedSelect) remoteQ.$select = translatedSelect;
-  // Safety net: avoid sending unsupported contains(...) in any case.
-  if (remoteQ.$filter && /contains\s*\(/i.test(String(remoteQ.$filter))) {
-    delete remoteQ.$filter;
-  }
-
-  let rows;
-  try {
-    rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
-    rows = mapCustomerGenRows(rows);
-    if (localSearch) rows = applyLocalSearch(rows, localSearch, cfg.searchFields || ['Kunnr', 'Name1']);
-    return dedupeRows(rows, (row) => String(row?.[cfg.keyField] ?? '').trim() || null);
-  } catch (err) {
-    // If backend rejects translated expression/select, fallback to local filtering in paged blocks.
-    const fallbackBase = { ...remoteQ };
-    if (localFilter) fallbackBase.$filter = depFilterOnly || undefined;
-    delete fallbackBase.$select;
-    delete fallbackBase.$top;
-    delete fallbackBase.$skip;
-
-    const localWindow = await _fetchCustomerGenLocalWindow({
-      cfg,
-      baseRemoteQuery: fallbackBase,
-      localFilter,
-      localSearch,
-      localTop,
-      localSkip
+  if (!localKey || !localText) {
+    throw _vhConfigError(vhName, 'invalid MDG_FIELD_CATALOG entry (missing VH_KEY_FIELD or VH_TEXT_FIELD)', {
+      vhEntitySet: vhName,
+      fieldCode: catalog?.FIELD_CODE || '',
+      vhKeyField: localKey,
+      vhTextField: localText
     });
-    return dedupeRows(localWindow, (row) => String(row?.[cfg.keyField] ?? '').trim() || null);
   }
 }
 
-async function readCustomerVtweg(req) {
-  const cfg = VH_MAP.VH_CustomerVtweg;
-  const tx = cds.tx(req);
-  const q = pickODataOptions(getQueryOptions(req));
-  if (q.$top === undefined) q.$top = 50;
+function _validateRemotePayloadContract(vhName, rows, catalog, route) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  const probe = rows[0] || {};
+  const keyField = String(catalog?.VH_KEY_FIELD || '').trim();
+  const textField = String(catalog?.VH_TEXT_FIELD || '').trim();
+  const rowFields = Object.keys(probe || {});
 
-  const localFilter = q.$filter;
-  const localSearch = q.$search ?? q.search ?? q.q;
-  const localTop = q.$top;
-  const localSkip = q.$skip;
-  const remoteQ = { ...q };
-  // Local contract fields differ from remote canonical names.
-  delete remoteQ.$select;
-  delete remoteQ.$filter;
-  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerVtweg', depFieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
-  if (!remoteQ.$filter) {
-    const depVkorg = _extractEqValue(localFilter, 'Vkorg');
-    if (depVkorg) {
-      remoteQ.$filter = `ProductSalesOrg eq '${_escapeODataLiteral(depVkorg)}'`;
-    }
+  if (!_hasFieldCaseInsensitive(probe, keyField) || !_hasFieldCaseInsensitive(probe, textField)) {
+    throw _vhConfigError(vhName, 'remote payload does not expose configured vhKeyField/vhTextField', {
+      vhEntitySet: vhName,
+      fieldCode: catalog?.FIELD_CODE || '',
+      vhKeyField: keyField,
+      vhTextField: textField,
+      remoteKeyField: String(route?.REMOTE_KEY_FIELD || '').trim(),
+      remoteTextField: String(route?.REMOTE_TEXT_FIELD || '').trim(),
+      servicePath: String(route?.SERVICE_PATH || '').trim(),
+      remoteEntitySet: String(route?.REMOTE_ENTITYSET || '').trim(),
+      sampleRemoteFields: rowFields.slice(0, 40)
+    });
   }
-  if (localFilter || localSearch) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-    delete remoteQ.$search;
-    delete remoteQ.search;
-    delete remoteQ.q;
-  }
-
-  let rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
-  rows = mapCustomerVtwegRows(rows);
-
-  if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = applyLocalSearch(rows, localSearch, ['Vkorg', 'VkorgText', 'Vtweg', 'VtwegText']);
-  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
-
-  const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
-  return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
 }
 
-async function readCustomerSpart(req) {
-  const cfg = VH_MAP.VH_CustomerSpart;
-  const tx = cds.tx(req);
-  const q = pickODataOptions(getQueryOptions(req));
-  if (q.$top === undefined) q.$top = 50;
-
-  const localFilter = q.$filter;
-  const localSearch = q.$search ?? q.search ?? q.q;
-  const localTop = q.$top;
-  const localSkip = q.$skip;
-  const remoteQ = { ...q };
-  // Local contract fields differ from remote canonical names.
-  delete remoteQ.$select;
-  delete remoteQ.$filter;
-  const depFieldCode = _getFieldCodeInput(req, q) || cfg.fieldCode;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSpart', depFieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
-  if (localFilter || localSearch) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-    delete remoteQ.$search;
-    delete remoteQ.search;
-    delete remoteQ.q;
-  }
-
-  let rows = await s4Get({ servicePath: cfg.servicePath, entitySet: cfg.entitySet, query: remoteQ });
-  rows = mapCustomerSpartRows(rows);
-
-  if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = applyLocalSearch(rows, localSearch, ['Spart', 'SpartText', 'Division', 'Division_Text', 'DivisionOID']);
-  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
-
-  const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
-  return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
-}
-
-async function readCustomerSoc(req) {
-  const cfg = VH_MAP.VH_CustomerSoc;
-  const tx = cds.tx(req);
-  const q = pickODataOptions(getQueryOptions(req));
-  if (q.$top === undefined) q.$top = 50;
-
-  const mode = getCustomerSocMode(q);
-  const localFilter = q.$filter;
-  const localSearch = q.$search ?? q.search ?? q.q;
-  const localTop = q.$top;
-  const localSkip = q.$skip;
-  const remoteQ = { ...q };
-  // Local contract fields differ from remote canonical names.
-  delete remoteQ.$select;
-
-  let entitySet = 'I_CompanyCode';
-  let depFieldCode = 'KNB1.BUKRS';
-  let searchFields = ['Bukrs', 'BukrsText'];
-  if (mode === 'DUNNING_AREA') {
-    entitySet = 'I_DunningAreaStdVH';
-    depFieldCode = 'KNB1.MABER';
-    searchFields = ['Maber', 'MaberText'];
-  }
-
-  delete remoteQ.$filter;
-  const effectiveDepFieldCode = _getFieldCodeInput(req, q) || depFieldCode;
-  const depState = await _applyDependencyFilters(tx, req, 'VH_CustomerSoc', effectiveDepFieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
-  if (localFilter || localSearch) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-    delete remoteQ.$search;
-    delete remoteQ.search;
-    delete remoteQ.q;
-  }
-
-  let rows = await s4Get({ servicePath: cfg.servicePath, entitySet, query: remoteQ });
-  rows = mapCustomerSocRows(rows, mode);
-
-  if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = applyLocalSearch(rows, localSearch, searchFields);
-  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
-
-  const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
-  return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
-}
-
-function applyLocalSearch(rows, searchText, fields = []) {
+function _applyLocalSearch(rows, searchText, fields = []) {
   const term = String(searchText ?? '').trim().replace(/^"(.*)"$/, '$1').toLowerCase();
   if (!term) return rows;
   if (!Array.isArray(fields) || !fields.length) return rows;
@@ -810,159 +654,291 @@ function applyLocalSearch(rows, searchText, fields = []) {
   );
 }
 
-function shouldForceLocalFilterVerification(filterExpr) {
-  const f = String(filterExpr || '').trim().toLowerCase();
-  if (!f) return false;
-  return f.includes('substringof(') || f.includes('contains(');
+function _ensureEntityKeys(vhName, rows, catalog) {
+  const entity = cds.model?.definitions?.[`MDGService.${vhName}`];
+  const elements = entity?.elements || {};
+  const keyFields = Object.keys(elements).filter((k) => elements[k]?.key);
+  if (!keyFields.length) return rows;
+
+  const localKey = String(catalog?.VH_KEY_FIELD || '').trim();
+
+  return (rows || []).map((row, idx) => {
+    const out = { ...row };
+
+    for (const keyField of keyFields) {
+      if (!_isEmptyValue(out[keyField])) continue;
+
+      if (localKey && keyField !== localKey && !_isEmptyValue(out[localKey])) {
+        out[keyField] = out[localKey];
+        continue;
+      }
+
+      if (keyField === 'ID') {
+        const seed = localKey && !_isEmptyValue(out[localKey]) ? String(out[localKey]) : String(idx + 1);
+        out.ID = seed.slice(0, 200);
+        continue;
+      }
+
+      out[keyField] = localKey && !_isEmptyValue(out[localKey]) ? out[localKey] : String(idx + 1);
+    }
+
+    return out;
+  });
 }
 
-function isFilterUnsupportedError(err) {
-  const msg = String(err?.message || '').toLowerCase();
-  const payload = (() => {
-    try {
-      return JSON.stringify(err).toLowerCase();
-    } catch (_) {
-      return '';
+function _dedupeByCatalogKey(rows, catalog) {
+  const localKey = String(catalog?.VH_KEY_FIELD || '').trim();
+  if (!localKey) return rows;
+  const seen = new Set();
+  const out = [];
+  for (const row of rows || []) {
+    const key = String(row?.[localKey] ?? '').trim();
+    if (!key) {
+      out.push(row);
+      continue;
     }
-  })();
-  const text = `${msg} ${payload}`;
-  return (
-    text.includes('property contains not found') ||
-    text.includes('property substringof not found') ||
-    text.includes('invalid filter') ||
-    text.includes('function contains') ||
-    text.includes('function substringof')
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+function _logVhRequest({ fieldCode, vhName, route, depLogs, remoteFilter }) {
+  console.info(
+    `[VH_REQ] fieldCode=${fieldCode || '-'} vhEntitySet=${vhName} servicePath=${route?.SERVICE_PATH || ''} remoteEntitySet=${route?.REMOTE_ENTITYSET || ''} deps=${JSON.stringify(
+      depLogs || []
+    )} remoteFilter=${remoteFilter || ''}`
   );
 }
 
-async function readVH(req, vhName) {
-  const cfg = VH_MAP[vhName];
-  if (!cfg) req.reject(500, `VH mapping not found for ${vhName}`);
+function _buildRemoteQuery(q) {
+  const remoteQ = { ...q };
+  // UI filter/search/select are usually local contract fields, not remote canonical names.
+  delete remoteQ.$select;
+  delete remoteQ.$filter;
+  delete remoteQ.$search;
+  delete remoteQ.search;
+  delete remoteQ.q;
+  return remoteQ;
+}
+
+async function _readVhGeneric(req, vhName) {
   const tx = cds.tx(req);
-
   const q = pickODataOptions(getQueryOptions(req));
-
-  // Guardrails: limit default top to avoid huge calls
   if (q.$top === undefined) q.$top = 50;
 
-  // Keep an optional local fallback for $filter (some S/4 views ignore substringof/contains).
+  const fieldId = _getFieldIdInput(req, q);
+  const fieldCode = _getFieldCodeInput(req, q);
+  const requestId = _getRequestIdInput(req, q);
+  const blockId = _getBlockIdInput(req, q);
+  const processCode = _getProcessCodeInput(req, q);
   const localFilter = q.$filter;
   const localSearch = q.$search ?? q.search ?? q.q;
   const localTop = q.$top;
   const localSkip = q.$skip;
-  const filterMode = cfg.filterMode || 'auto'; // auto=remote first, fallback local on known filter errors
-  const enforceLocalFilter = Boolean(localFilter) && (
-    filterMode === 'local' ||
-    (filterMode === 'auto' && shouldForceLocalFilterVerification(localFilter))
-  );
-  const remoteQ = { ...q };
-  let forceLocalFilter = false;
-  let fieldCode = _getFieldCodeInput(req, q) || String(cfg.fieldCode || '').trim();
-  if (!fieldCode) {
-    const fieldCodes = await _getVhFieldCodes(tx, vhName);
-    if (fieldCodes.length === 1) fieldCode = fieldCodes[0];
-    else if (fieldCodes.length > 1) fieldCode = _resolveFieldCodeByQueryHints(fieldCodes, q);
+
+  const catalog = await _loadCatalogRuntime(tx, vhName, {
+    fieldId,
+    fieldCode,
+    requestId,
+    blockId,
+    processCode
+  });
+  const route = await _loadRouteRuntime(tx, vhName);
+  _validateCatalogRouteContract(vhName, catalog, route);
+
+  const invalidReason = _vhInvalidMappings.get(vhName);
+  if (invalidReason) {
+    throw _vhConfigError(vhName, invalidReason, {
+      vhEntitySet: vhName,
+      servicePath: route.SERVICE_PATH,
+      remoteEntitySet: route.REMOTE_ENTITYSET
+    });
   }
 
-  if (localFilter && filterMode === 'local') {
-    delete remoteQ.$filter;
-    forceLocalFilter = true;
-  }
-  if (localFilter && filterMode === 'auto' && enforceLocalFilter) {
-    // Avoid sending UI-local field names (e.g. Kunnr/Name1) to remote sets
-    // that expose different canonical properties (e.g. BusinessPartner).
-    delete remoteQ.$filter;
-    forceLocalFilter = true;
-  }
-  if (localSearch && cfg.searchFields) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-    delete remoteQ.$search;
-    delete remoteQ.search;
-    delete remoteQ.q;
-  }
-  if (forceLocalFilter || enforceLocalFilter) {
-    delete remoteQ.$top;
-    delete remoteQ.$skip;
-  }
-  if (vhName === 'VH_CustomerGen') {
-    // Local contract fields (Kunnr/Name1) are not S/4 canonical names in I_BusinessPartner.
-    delete remoteQ.$select;
-  }
+  await _validateRouteEntitySet(vhName, route);
 
-  const depState = await _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ);
-  if (depState.missingRequired) return [];
+  const remoteQ = _buildRemoteQuery(q);
+  const dep = await _applyDependencyFilters(tx, req, vhName, catalog.FIELD_CODE, q, remoteQ);
+  _logVhRequest({
+    fieldCode: catalog.FIELD_CODE,
+    vhName,
+    route,
+    depLogs: dep.resolvedDepLogs,
+    remoteFilter: remoteQ.$filter
+  });
 
-  let rows;
+  if (dep.missingRequired) return [];
+
+  let rows = await s4Get({
+    servicePath: String(route.SERVICE_PATH || '').trim(),
+    entitySet: String(route.REMOTE_ENTITYSET || '').trim(),
+    query: remoteQ
+  });
+  _validateRemotePayloadContract(vhName, rows, catalog, route);
+
+  if (localFilter) rows = applyLocalFilter(rows, localFilter);
+  if (localSearch) rows = _applyLocalSearch(rows, localSearch, _toCsvArray(catalog.VH_SEARCH_FIELDS));
+  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
+
+  rows = _ensureEntityKeys(vhName, rows, catalog);
+  rows = _dedupeByCatalogKey(rows, catalog);
+
+  return rows;
+}
+
+async function _loadAllRoutes(db) {
+  const sqlActive =
+    `SELECT
+       "VH_ENTITYSET",
+       "DESTINATION_NAME",
+       "SERVICE_PATH",
+       "REMOTE_ENTITYSET",
+       "REMOTE_KEY_FIELD",
+       "REMOTE_TEXT_FIELD",
+       "REMOTE_SEARCH_FIELDS"
+     FROM "MDG_VH_ROUTE"
+    WHERE "IS_ENABLED" = true`;
+
+  const sqlPlain =
+    `SELECT
+       "VH_ENTITYSET",
+       "DESTINATION_NAME",
+       "SERVICE_PATH",
+       "REMOTE_ENTITYSET",
+       "REMOTE_KEY_FIELD",
+       "REMOTE_TEXT_FIELD",
+       "REMOTE_SEARCH_FIELDS"
+     FROM "MDG_VH_ROUTE"`;
+
   try {
-    rows = await _s4GetWithEntityFallback(cfg, remoteQ);
+    return await db.run(sqlActive);
+  } catch (_) {
+    return db.run(sqlPlain);
+  }
+}
+
+async function validateVhMappingsOnStartup() {
+  _vhInvalidMappings.clear();
+  _metadataEntitySetCache.clear();
+
+  let routes = [];
+  try {
+    const db = await cds.connect.to('db');
+    routes = await _loadAllRoutes(db);
   } catch (err) {
-    if (localFilter && filterMode === 'auto' && isFilterUnsupportedError(err)) {
-      const retryQ = { ...q };
-      delete retryQ.$filter;
-      delete retryQ.$top;
-      delete retryQ.$skip;
-      rows = await _s4GetWithEntityFallback(cfg, retryQ);
-      forceLocalFilter = true;
-    } else {
-      throw err;
+    const msg = `cannot read MDG_VH_ROUTE: ${String(err?.message || err)}`;
+    if (FAIL_FAST_ON_VH_METADATA) throw new Error(msg);
+    console.error(JSON.stringify({ tag: 'VH_STARTUP_ROUTE_READ_ERROR', error: msg }));
+    return;
+  }
+
+  for (const route of routes || []) {
+    const vhName = String(route?.VH_ENTITYSET || '').trim();
+    const servicePath = String(route?.SERVICE_PATH || '').trim();
+    const remoteEntitySet = String(route?.REMOTE_ENTITYSET || '').trim();
+    if (!vhName || !servicePath || !remoteEntitySet) {
+      _vhInvalidMappings.set(vhName || '?', 'invalid route row (missing VH_ENTITYSET/SERVICE_PATH/REMOTE_ENTITYSET)');
+      console.error(
+        JSON.stringify({
+          tag: 'VH_STARTUP_MAPPING_INVALID',
+          vhName,
+          servicePath,
+          remoteEntitySet
+        })
+      );
+      continue;
+    }
+
+    try {
+      const entitySets = await _fetchMetadataEntitySets(servicePath);
+      if (!entitySets.has(remoteEntitySet)) {
+        const reason = `entitySet '${remoteEntitySet}' not found in metadata '${servicePath}'`;
+        _vhInvalidMappings.set(vhName, reason);
+        console.error(
+          JSON.stringify({
+            tag: 'VH_STARTUP_MAPPING_MISSING',
+            vhName,
+            servicePath,
+            remoteEntitySet,
+            reason
+          })
+        );
+      }
+    } catch (err) {
+      const reason = `metadata fetch failed for '${servicePath}': ${String(err?.message || err)}`;
+      _vhInvalidMappings.set(vhName, reason);
+      console.error(
+        JSON.stringify({
+          tag: 'VH_STARTUP_METADATA_ERROR',
+          vhName,
+          servicePath,
+          remoteEntitySet,
+          reason
+        })
+      );
     }
   }
 
-  if (vhName === 'VH_CustomerGen') {
-    rows = mapCustomerGenRows(rows);
+  if (_vhInvalidMappings.size && FAIL_FAST_ON_VH_METADATA) {
+    const details = Array.from(_vhInvalidMappings.entries())
+      .map(([vhName, reason]) => `${vhName}: ${reason}`)
+      .join('; ');
+    throw new Error(`VH metadata validation failed: ${details}`);
   }
-
-  if (localFilter && (forceLocalFilter || enforceLocalFilter)) {
-    rows = applyLocalFilter(rows, localFilter);
-  }
-  if (localSearch && cfg.searchFields) {
-    rows = applyLocalSearch(rows, localSearch, cfg.searchFields);
-  }
-  if ((localFilter && (forceLocalFilter || enforceLocalFilter)) || (localSearch && cfg.searchFields)) {
-    rows = applyLocalPaging(rows, localTop, localSkip);
-  }
-
-  if (cfg.syntheticKey) {
-    const withId = rows.map((row, idx) => ({ ...row, ID: toSyntheticId(row, cfg.keyParts, idx) }));
-    return dedupeRows(withId, (row) => String(row?.ID || '').trim() || null);
-  }
-  if (cfg.keyField) {
-    return dedupeRows(rows, (row) => String(row?.[cfg.keyField] ?? '').trim() || null);
-  }
-  return dedupeRows(rows, (row) => JSON.stringify(row));
 }
 
+const expose = (vhName) => (req) => _readVhGeneric(req, vhName);
+
 module.exports = {
-  readCustomerGen,
-  readCustomerClassification: (req) => readVH(req, 'VH_CustomerClassification'),
-  readMaterialProduct: (req) => readVH(req, 'VH_MaterialProduct'),
-  readMaterialSalesOrg: (req) => readVH(req, 'VH_MaterialSalesOrg'),
-  readMaterialVtweg: (req) => readVH(req, 'VH_MaterialVtweg'),
-  readMaterialKtgrm: (req) => readVH(req, 'VH_MaterialKtgrm'),
-  readCustomerOrgV,
-  readCustomerVtweg,
-  readCustomerSpart,
-  readCustomerLzone: (req) => readVH(req, 'VH_CustomerLzone'),
-  readCustomerRegion: (req) => readVH(req, 'VH_CustomerRegion'),
-  readCustomerPaymentCondition: (req) => readVH(req, 'VH_CustomerPaymentCondition'),
-  readCustomerBzirk: (req) => readVH(req, 'VH_CustomerBzirk'),
-  readCustomerSoc,
-  readCustomerCom:  (req) => readVH(req, 'VH_CustomerCom'),
-  readCustomerEmp:  (req) => readVH(req, 'VH_CustomerEmp'),
-  readCustomerBan:  (req) => readVH(req, 'VH_CustomerBan'),
-  readCustomerImp:  (req) => readVH(req, 'VH_CustomerImp'),
-  readCustomerNif:  (req) => readVH(req, 'VH_CustomerNif'),
-  readDriverGen:    (req) => readVH(req, 'VH_DriverGen'),
-  readDriverRol:    (req) => readVH(req, 'VH_DriverRol'),
-  readDriverCom:    (req) => readVH(req, 'VH_DriverCom'),
-  readDriverImp:    (req) => readVH(req, 'VH_DriverImp'),
-  readDriverNif:    (req) => readVH(req, 'VH_DriverNif'),
-  readDriverAdi:    (req) => readVH(req, 'VH_DriverAdi'),
-  readBillToGen:    (req) => readVH(req, 'VH_BillToGen'),
-  readBillToCom:    (req) => readVH(req, 'VH_BillToCom'),
-  readBillToImp:    (req) => readVH(req, 'VH_BillToImp'),
-  readShipToGen:    (req) => readVH(req, 'VH_ShipToGen'),
-  readShipToCom:    (req) => readVH(req, 'VH_ShipToCom'),
-  readResources:    (req) => readVH(req, 'VH_Resources')
+  readCustomerGen: expose('VH_CustomerGen'),
+  readCustomerClassification: expose('VH_CustomerClassification'),
+  readMaterialProduct: expose('VH_MaterialProduct'),
+  readMaterialSalesOrg: expose('VH_MaterialSalesOrg'),
+  readMaterialVtweg: expose('VH_MaterialVtweg'),
+  readMaterialKtgrm: expose('VH_MaterialKtgrm'),
+  readCustomerOrgV: expose('VH_CustomerOrgV'),
+  readCustomerVtweg: expose('VH_CustomerVtweg'),
+  readCustomerSpart: expose('VH_CustomerSpart'),
+  readCustomerLzone: expose('VH_CustomerLzone'),
+  readCustomerRegion: expose('VH_CustomerRegion'),
+  readCustomerPaymentCondition: expose('VH_CustomerPaymentCondition'),
+  readCustomerBzirk: expose('VH_CustomerBzirk'),
+  readCustomerDunningArea: expose('VH_CustomerDunningArea'),
+  readDestMercBP: expose('VH_DestMercBP'),
+  readDestMercOrgV: expose('VH_DestMercOrgV'),
+  readDestMercVtweg: expose('VH_DestMercVtweg'),
+  readDestMercSpart: expose('VH_DestMercSpart'),
+  readDestMercBzirk: expose('VH_DestMercBzirk'),
+  readDestMercSoc: expose('VH_DestMercSoc'),
+  readDestMercDunningArea: expose('VH_DestMercDunningArea'),
+  readDestMercPaymentCondition: expose('VH_DestMercPaymentCondition'),
+  readDestMercImp: expose('VH_DestMercImp'),
+  readDestFactBP: expose('VH_DestFactBP'),
+  readDestFactSalesOrg: expose('VH_DestFactSalesOrg'),
+  readDestFactVtweg: expose('VH_DestFactVtweg'),
+  readDestMercBanks: expose('VH_DestMercBanks'),
+  readDestMercBank: expose('VH_DestMercBank'),
+  readDestMercLzone: expose('VH_DestMercLzone'),
+  readDestMercRegion: expose('VH_DestMercRegion'),
+  readCustomerSoc: expose('VH_CustomerSoc'),
+  readCustomerCom: expose('VH_CustomerCom'),
+  readCustomerEmp: expose('VH_CustomerEmp'),
+  readCustomerBan: expose('VH_CustomerBan'),
+  readCustomerImp: expose('VH_CustomerImp'),
+  readCustomerNif: expose('VH_CustomerNif'),
+  readDriverGen: expose('VH_DriverGen'),
+  readDriverRol: expose('VH_DriverRol'),
+  readDriverCom: expose('VH_DriverCom'),
+  readDriverImp: expose('VH_DriverImp'),
+  readDriverNif: expose('VH_DriverNif'),
+  readDriverAdi: expose('VH_DriverAdi'),
+  readBillToGen: expose('VH_BillToGen'),
+  readBillToCom: expose('VH_BillToCom'),
+  readBillToImp: expose('VH_BillToImp'),
+  readShipToGen: expose('VH_ShipToGen'),
+  readShipToCom: expose('VH_ShipToCom'),
+  readResources: expose('VH_Resources'),
+  validateVhMappingsOnStartup
 };

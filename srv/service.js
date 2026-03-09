@@ -1,9 +1,14 @@
 const cds = require('@sap/cds');
 let _requestResultsRouteRegistered = false;
+let _vhMappingsValidated = false;
 
 module.exports = cds.service.impl(async function () {
 
   const vh = require('./handlers/valuehelp-proxy.handler');
+  if (!_vhMappingsValidated) {
+    _vhMappingsValidated = true;
+    await vh.validateVhMappingsOnStartup();
+  }
   const auth = require('./handlers/auth.handler');
   const process = require('./handlers/process.handler');
   const form = require('./handlers/formDefinition.handler');
@@ -28,6 +33,23 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_CustomerRegion', vh.readCustomerRegion);
   this.on('READ', 'VH_CustomerPaymentCondition', vh.readCustomerPaymentCondition);
   this.on('READ', 'VH_CustomerBzirk', vh.readCustomerBzirk);
+  this.on('READ', 'VH_CustomerDunningArea', vh.readCustomerDunningArea);
+  this.on('READ', 'VH_DestMercBP', vh.readDestMercBP);
+  this.on('READ', 'VH_DestMercOrgV', vh.readDestMercOrgV);
+  this.on('READ', 'VH_DestMercVtweg', vh.readDestMercVtweg);
+  this.on('READ', 'VH_DestMercSpart', vh.readDestMercSpart);
+  this.on('READ', 'VH_DestMercBzirk', vh.readDestMercBzirk);
+  this.on('READ', 'VH_DestMercSoc', vh.readDestMercSoc);
+  this.on('READ', 'VH_DestMercDunningArea', vh.readDestMercDunningArea);
+  this.on('READ', 'VH_DestMercPaymentCondition', vh.readDestMercPaymentCondition);
+  this.on('READ', 'VH_DestMercImp', vh.readDestMercImp);
+  this.on('READ', 'VH_DestFactBP', vh.readDestFactBP);
+  this.on('READ', 'VH_DestFactSalesOrg', vh.readDestFactSalesOrg);
+  this.on('READ', 'VH_DestFactVtweg', vh.readDestFactVtweg);
+  this.on('READ', 'VH_DestMercBanks', vh.readDestMercBanks);
+  this.on('READ', 'VH_DestMercBank', vh.readDestMercBank);
+  this.on('READ', 'VH_DestMercLzone', vh.readDestMercLzone);
+  this.on('READ', 'VH_DestMercRegion', vh.readDestMercRegion);
   this.on('READ', 'VH_CustomerSoc', vh.readCustomerSoc);
   this.on('READ', 'VH_CustomerCom', vh.readCustomerCom);
   this.on('READ', 'VH_CustomerEmp', vh.readCustomerEmp);

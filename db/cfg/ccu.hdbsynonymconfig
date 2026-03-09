@@ -23,6 +23,12 @@
       "object": "MDG_FIELD_VH_DEPENDENCY"
     }
   },
+  "MDG_VH_ROUTE": {
+    "target": {
+      "schema": "CCU",
+      "object": "MDG_VH_ROUTE"
+    }
+  },
   "MDG_BLOCK_FIELD": {
     "target": {
       "schema": "CCU",
