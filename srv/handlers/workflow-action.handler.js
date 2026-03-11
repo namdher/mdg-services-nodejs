@@ -634,6 +634,60 @@ async function _readCustomerCreationControls(tx, requestId) {
   return controls;
 }
 
+const MATERIAL_COMBO_COMPONENT_FIELD_CODES = Object.freeze([
+  'STPO.STLAN',
+  'STPO.IDNRK',
+  'STPO.MENGE',
+  'STPO.MEINS'
+]);
+
+const MATERIAL_COMBO_REQUIRED_COMPONENT_CODES = Object.freeze([
+  'STPO.IDNRK',
+  'STPO.MENGE',
+  'STPO.MEINS'
+]);
+
+async function _loadMaterialComboComponentMap(tx, { processId, sapTargetId }) {
+  if (!processId || !sapTargetId) return [];
+  const rows = await tx.run(
+    `SELECT
+        pm."FIELD_ID"    AS "FIELD_ID",
+        pm."SAP_PATH"    AS "SAP_PATH",
+        pm."SAP_PROPERTY" AS "SAP_PROPERTY",
+        fc."FIELD_CODE"  AS "FIELD_CODE",
+        fc."DATA_TYPE"   AS "DATA_TYPE"
+       FROM "MDG_SAP_PAYLOAD_MAP" pm
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = pm."FIELD_ID"
+      WHERE pm."PROCESS_ID" = ?
+        AND pm."SAP_TARGET_ID" = ?
+        AND UPPER(COALESCE(pm."SAP_PATH", '')) = 'N_COMPONENTES'`,
+    [processId, sapTargetId]
+  );
+  return (rows || []).map((r) => ({
+    fieldId: String(r.FIELD_ID || '').trim(),
+    fieldCode: String(r.FIELD_CODE || '').trim().toUpperCase(),
+    sapPath: String(r.SAP_PATH || '').trim(),
+    sapProperty: String(r.SAP_PROPERTY || '').trim(),
+    dataType: String(r.DATA_TYPE || '').trim()
+  })).filter((r) => r.fieldId && r.fieldCode && r.sapProperty);
+}
+
+function _throwMaterialComboMandatoryError(entitySet, details) {
+  const err = new Error(`Mandatory fields missing for step ${entitySet}: ${details.join('; ')}`);
+  err.statusCode = 400;
+  err.code = 'MANDATORY_FIELDS_MISSING_STEP';
+  err.details = details;
+  throw err;
+}
+
+function _throwMaterialComboConfigError(entitySet, reason) {
+  const err = new Error(`Invalid component mapping for step ${entitySet}: ${reason}`);
+  err.statusCode = 422;
+  err.code = 'INVALID_COMPONENT_MAPPING';
+  throw err;
+}
+
 async function _buildSapPayload(tx, requestId, entitySet, processId, options = {}) {
   const fieldCodePrefixes = Array.isArray(options.fieldCodePrefixes)
     ? options.fieldCodePrefixes.map((p) => String(p || '').trim()).filter(Boolean)
@@ -644,6 +698,8 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
   const processRoleId = options.processRoleId || null;
   const countryCode = options.countryCode || null;
   const creationDateOverride = options.creationDateOverride || null;
+  const processCode = String(options.processCode || '').trim().toUpperCase();
+  const sapTargetId = String(options.sapTargetId || '').trim();
   const excludeSapFields = Array.isArray(options.excludeSapFields)
     ? new Set(options.excludeSapFields.map((x) => _normalizePropertyName(x)))
     : new Set();
@@ -743,9 +799,107 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
   const selectedFieldIds = new Set();
   const payload = {};
   const skippedFields = [];
+  const isMaterialComboFlow =
+    processCode === 'MATERIAL_CREATION_COMBOS' &&
+    String(entitySet || '').trim().toUpperCase() === 'MATERIALESCOMBOSSET';
+  let componentFieldIds = new Set();
+
+  if (isMaterialComboFlow) {
+    const componentMapRows = await _loadMaterialComboComponentMap(tx, {
+      processId: scopedProcessId,
+      sapTargetId
+    });
+    const expected = new Set(MATERIAL_COMBO_COMPONENT_FIELD_CODES);
+    const actual = new Set(componentMapRows.map((r) => r.fieldCode));
+    const missing = MATERIAL_COMBO_COMPONENT_FIELD_CODES.filter((c) => !actual.has(c));
+    const extras = Array.from(actual).filter((c) => !expected.has(c));
+    if (missing.length) {
+      _throwMaterialComboConfigError(entitySet, `missing component mappings: ${missing.join(', ')}`);
+    }
+    if (extras.length) {
+      _throwMaterialComboConfigError(entitySet, `unexpected component mappings: ${extras.join(', ')}`);
+    }
+
+    const componentMapByCode = new Map(componentMapRows.map((r) => [r.fieldCode, r]));
+    componentFieldIds = new Set(componentMapRows.map((r) => r.fieldId));
+
+    const latestByFieldLine = new Map();
+    for (const row of rows || []) {
+      const fieldId = String(row.FIELD_ID || '').trim();
+      if (!componentFieldIds.has(fieldId)) continue;
+      const lineNo = Number(row.LINE_NO || 1);
+      const key = `${fieldId}::${lineNo}`;
+      if (!latestByFieldLine.has(key)) latestByFieldLine.set(key, row);
+    }
+
+    const byLine = new Map();
+    for (const row of latestByFieldLine.values()) {
+      const lineNo = Number(row.LINE_NO || 1);
+      if (!byLine.has(lineNo)) byLine.set(lineNo, {});
+      const fieldCode = String(row.FIELD_CODE || '').trim().toUpperCase();
+      byLine.get(lineNo)[fieldCode] = row.VALUE;
+    }
+
+    const lineErrors = [];
+    const lineItems = [];
+    const orderedLineNos = Array.from(byLine.keys()).sort((a, b) => a - b);
+    for (const lineNo of orderedLineNos) {
+      const rowByCode = byLine.get(lineNo) || {};
+      const rawStlan = String(rowByCode['STPO.STLAN'] ?? '').trim();
+      const resolvedStlan = rawStlan || '5';
+
+      const missingFields = [];
+      for (const fieldCode of MATERIAL_COMBO_REQUIRED_COMPONENT_CODES) {
+        const v = String(rowByCode[fieldCode] ?? '').trim();
+        if (!v) missingFields.push(fieldCode);
+      }
+      if (missingFields.length) {
+        lineErrors.push(`LINE_NO ${lineNo}: ${missingFields.join(', ')}`);
+        continue;
+      }
+
+      const lineRawByCode = {
+        ...rowByCode,
+        'STPO.STLAN': resolvedStlan
+      };
+
+      const lineItem = {};
+      for (const fieldCode of MATERIAL_COMBO_COMPONENT_FIELD_CODES) {
+        const mapRow = componentMapByCode.get(fieldCode);
+        if (!mapRow) continue;
+        const raw = String(lineRawByCode[fieldCode] ?? '').trim();
+        if (!raw) continue;
+        const conversion = convertValueForSap(raw, {
+          fallbackDataType: mapRow.dataType
+        });
+        if (!conversion.ok) {
+          lineErrors.push(`LINE_NO ${lineNo}: ${fieldCode} (${conversion.reason || 'type_conversion_failed'})`);
+          continue;
+        }
+        lineItem[mapRow.sapProperty] = conversion.value;
+      }
+      if (Object.keys(lineItem).length) {
+        lineItems.push(lineItem);
+      }
+    }
+
+    if (lineErrors.length) {
+      _throwMaterialComboMandatoryError(entitySet, lineErrors);
+    }
+    payload.N_Componentes = lineItems;
+  }
 
   for (const row of rows || []) {
     const fieldId = row.FIELD_ID;
+    if (componentFieldIds.has(String(fieldId || '').trim())) {
+      skippedFields.push({
+        fieldId,
+        fieldCode: row.FIELD_CODE,
+        sapField: row.SAP_FIELD,
+        reason: 'component_multi_line_group'
+      });
+      continue;
+    }
     if (selectedFieldIds.has(fieldId)) continue;
     selectedFieldIds.add(fieldId);
     const fieldControl = Number(fieldControlByFieldId.get(fieldId) ?? 0);
@@ -2115,7 +2269,13 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
       }
 
-      const { payload, skippedFields } = await _buildSapPayload(tx, requestId, sapTarget.entitySet, processId);
+      const requesterRoleId = await _resolveRequesterRoleId(tx, processId);
+      const { payload, skippedFields } = await _buildSapPayload(tx, requestId, sapTarget.entitySet, processId, {
+        processCode,
+        sapTargetId: sapTarget.id,
+        processRoleId: requesterRoleId,
+        countryCode: request.COUNTRY_CODE
+      });
       approveResult = await _postToS4AndPersist(tx, {
         req,
         requestId,
