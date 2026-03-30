@@ -429,6 +429,17 @@ service MDGService @(path:'/mdg') {
     ResourceGroup : String(60);
   }
 
+  @cds.persistence.skip @readonly entity VH_ResourceTransportationType {
+    key TransportationType : String(10);
+    Description            : String(40);
+  }
+
+  @cds.persistence.skip @readonly entity VH_ResourceLocation {
+    key LocationNumber : String(20);
+    LocationType       : String(4);
+    Description        : String(40);
+  }
+
   @cds.persistence.skip @readonly entity VH_BU_GROUP {
     key CODE : String(40);
     TEXT     : String(120);

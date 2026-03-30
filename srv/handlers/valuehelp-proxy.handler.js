@@ -941,5 +941,7 @@ module.exports = {
   readShipToGen: expose('VH_ShipToGen'),
   readShipToCom: expose('VH_ShipToCom'),
   readResources: expose('VH_Resources'),
+  readResourceTransportationType: expose('VH_ResourceTransportationType'),
+  readResourceLocation: expose('VH_ResourceLocation'),
   validateVhMappingsOnStartup
 };

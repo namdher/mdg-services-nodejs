@@ -73,6 +73,8 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_ShipToGen', vh.readShipToGen);
   this.on('READ', 'VH_ShipToCom', vh.readShipToCom);
   this.on('READ', 'VH_Resources', vh.readResources);
+  this.on('READ', 'VH_ResourceTransportationType', vh.readResourceTransportationType);
+  this.on('READ', 'VH_ResourceLocation', vh.readResourceLocation);
   this.on('READ', 'VH_BU_GROUP', internalVh.readVhBuGroup);
   this.on('READ', 'VH_Internal_TAXKD', internalVh.readVhInternalTaxkd);
   this.on('READ', 'VH_Internal_Boolean', internalVh.readVhInternalBoolean);

@@ -145,6 +145,27 @@ function _extractJwtFromReq(req) {
   return (m?.[1] || value || '').trim() || null;
 }
 
+function _decodeJwtPayloadUnsafe(token) {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) return {};
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    const payload = JSON.parse(json);
+    return payload && typeof payload === 'object' ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
+function _maskToken(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length <= 16) return `${raw.slice(0, 4)}...`;
+  return `${raw.slice(0, 8)}...${raw.slice(-8)}`;
+}
+
 function _extractSapObjectKey(body) {
   if (!body) return null;
   const root = body?.d || body;
@@ -1288,6 +1309,31 @@ async function _postToS4AndPersist(tx, {
   const entitySet = String(sapTarget?.entitySet || '').trim();
   const sapTargetId = sapTarget?.id || null;
   const jwt = _extractJwtFromReq(req);
+  const ppDebug = String(process.env.MDG_PP_DEBUG || 'false').toLowerCase() === 'true';
+
+  if (ppDebug) {
+    const claims = _decodeJwtPayloadUnsafe(jwt);
+    const nowEpoch = Math.floor(Date.now() / 1000);
+    console.info('[PP_DEBUG_REQUEST]', JSON.stringify({
+      destinationName,
+      servicePath,
+      entitySet,
+      hasJwt: Boolean(jwt),
+      tokenMask: _maskToken(jwt),
+      reqUserId: req?.user?.id || null,
+      claims: {
+        user_name: claims.user_name || null,
+        login_name: claims.login_name || null,
+        email: claims.email || null,
+        sub: claims.sub || null,
+        user_id: claims.user_id || null,
+        origin: claims.origin || null,
+        iss: claims.iss || null,
+        exp: claims.exp || null,
+        expInSec: claims.exp ? Number(claims.exp) - nowEpoch : null
+      }
+    }));
+  }
 
   if (Array.isArray(skippedFields) && skippedFields.length) {
     console.warn('[SAP_PAYLOAD_SKIPPED_FIELDS]', JSON.stringify({
@@ -1328,6 +1374,19 @@ async function _postToS4AndPersist(tx, {
     status = Number(err?.response?.status || err?.statusCode || 500);
     responseBody = err?.response?.data ?? err?.data ?? { error: err?.message || 'S/4 POST failed' };
     errorHeaders = err?.response?.headers ?? err?.headers ?? null;
+    if (ppDebug) {
+      console.warn('[PP_DEBUG_ERROR]', JSON.stringify({
+        destinationName,
+        servicePath,
+        entitySet,
+        status,
+        message: String(err?.message || ''),
+        wwwAuthenticate:
+          err?.response?.headers?.['www-authenticate'] ||
+          err?.response?.headers?.['WWW-Authenticate'] ||
+          null
+      }));
+    }
   }
 
   const correlationId = _extractCorrelationId(responseHeaders, errorHeaders);
