@@ -60,6 +60,40 @@ function tokenPayload(req){
   return {};
 }
 
+function tokenClaims(req){
+  const ti = req?._?.req?.authInfo?.getTokenInfo?.();
+  if (ti && typeof ti.getClaims === 'function') {
+    const c = ti.getClaims();
+    if (c && typeof c === 'object') return c;
+  }
+  return {};
+}
+
+function authInfoDebug(req) {
+  const authInfo = req?._?.req?.authInfo;
+  const ti = authInfo?.getTokenInfo?.();
+  const token = extractBearerToken(req);
+  const decodedBearer = token ? decodeJwtPayload(token) : {};
+
+  const readHeader = (name) =>
+    req?.headers?.[name] ||
+    req?.req?.headers?.[name] ||
+    req?._?.req?.headers?.[name] ||
+    null;
+
+  return {
+    hasAuthInfo: Boolean(authInfo),
+    hasTokenInfo: Boolean(ti),
+    headerSnapshot: {
+      authorization: readHeader('authorization'),
+      x_forwarded_authorization: readHeader('x-forwarded-authorization')
+    },
+    rawPayloadFromTokenInfo: tokenPayload(req),
+    rawClaimsFromTokenInfo: tokenClaims(req),
+    decodedBearer
+  };
+}
+
 async function resolveGroups(req){
   const token = extractBearerToken(req);
   const payload = tokenPayload(req);
@@ -86,9 +120,11 @@ async function resolveGroups(req){
 
 async function whoAmI(req){
   const { payload, iasGroups, roleCollections, resolvedGroups } = await resolveGroups(req);
+  const debug = authInfoDebug(req);
 
   // DEBUG: imprime completo en logs (CF logs)
   console.log("JWT FULL PAYLOAD =", JSON.stringify(payload, null, 2));
+  console.log("AUTH INFO DEBUG =", JSON.stringify(debug, null, 2));
 
   return JSON.stringify({
     ok: true,
@@ -108,6 +144,7 @@ async function whoAmI(req){
       xs_rolecollections: roleCollections
     },
     resolvedGroups,
+    authInfoDebug: debug,
     payloadKeys: Object.keys(payload || {}).slice(0, 80),
 
     // DEBUG: payload completo (quitar luego)

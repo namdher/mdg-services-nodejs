@@ -145,6 +145,28 @@ function _extractJwtFromReq(req) {
   return (m?.[1] || value || '').trim() || null;
 }
 
+function _extractPrincipalPropagationJwtFromReq(req) {
+  const candidates = [
+    req?.headers?.authorization,
+    req?.headers?.['x-forwarded-authorization'],
+    req?._?.req?.headers?.authorization,
+    req?._?.req?.headers?.['x-forwarded-authorization'],
+    req?.http?.req?.headers?.authorization,
+    req?.http?.req?.headers?.['x-forwarded-authorization'],
+    cds?.context?.http?.req?.headers?.authorization,
+    cds?.context?.http?.req?.headers?.['x-forwarded-authorization']
+  ];
+
+  for (const raw of candidates) {
+    const value = String(raw || '').trim();
+    if (!value) continue;
+    const bearer = value.match(/^Bearer\s+(.+)$/i);
+    return (bearer?.[1] || value).trim() || null;
+  }
+
+  return null;
+}
+
 function _decodeJwtPayloadUnsafe(token) {
   try {
     const parts = String(token || '').split('.');
@@ -1305,35 +1327,79 @@ async function _postToS4AndPersist(tx, {
   updateSubjectFromSap = false
 }) {
   const destinationName = String(sapTarget?.destinationName || '').trim();
+  if (destinationName === 'S4H-PP') {
+    return _postToS4AndPersistPrincipalPropagation(tx, {
+      req,
+      requestId,
+      processId,
+      processCode,
+      sapTarget,
+      payload,
+      userId,
+      previousStatus,
+      skippedFields,
+      updateRequestState,
+      emitErrorBusinessComment,
+      updateSubjectFromSap
+    });
+  }
+
+  return _postToS4AndPersistLegacy(tx, {
+    req,
+    requestId,
+    processId,
+    processCode,
+    sapTarget,
+    payload,
+    userId,
+    previousStatus,
+    skippedFields,
+    updateRequestState,
+    emitErrorBusinessComment,
+    updateSubjectFromSap
+  });
+}
+
+async function _postToS4AndPersistLegacy(tx, {
+  req,
+  requestId,
+  processId,
+  processCode,
+  sapTarget,
+  payload,
+  userId,
+  previousStatus,
+  skippedFields = [],
+  updateRequestState = true,
+  emitErrorBusinessComment = true,
+  updateSubjectFromSap = false
+}) {
+  const destinationName = String(sapTarget?.destinationName || '').trim();
   const servicePath = String(sapTarget?.servicePath || '').trim();
   const entitySet = String(sapTarget?.entitySet || '').trim();
   const sapTargetId = sapTarget?.id || null;
   const jwt = _extractJwtFromReq(req);
-  const ppDebug = String(process.env.MDG_PP_DEBUG || 'false').toLowerCase() === 'true';
-
-  if (ppDebug) {
-    const claims = _decodeJwtPayloadUnsafe(jwt);
-    const nowEpoch = Math.floor(Date.now() / 1000);
-    console.info('[PP_DEBUG_REQUEST]', JSON.stringify({
-      destinationName,
-      servicePath,
-      entitySet,
-      hasJwt: Boolean(jwt),
-      tokenMask: _maskToken(jwt),
-      reqUserId: req?.user?.id || null,
-      claims: {
-        user_name: claims.user_name || null,
-        login_name: claims.login_name || null,
-        email: claims.email || null,
-        sub: claims.sub || null,
-        user_id: claims.user_id || null,
-        origin: claims.origin || null,
-        iss: claims.iss || null,
-        exp: claims.exp || null,
-        expInSec: claims.exp ? Number(claims.exp) - nowEpoch : null
-      }
-    }));
-  }
+  const claims = _decodeJwtPayloadUnsafe(jwt);
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  console.info('[PP_DEBUG_REQUEST]', JSON.stringify({
+    destinationName,
+    servicePath,
+    entitySet,
+    hasJwt: Boolean(jwt),
+    tokenMask: _maskToken(jwt),
+    reqUserId: req?.user?.id || null,
+    claims: {
+      user_name: claims.user_name || null,
+      login_name: claims.login_name || null,
+      email: claims.email || null,
+      sub: claims.sub || null,
+      user_id: claims.user_id || null,
+      origin: claims.origin || null,
+      iss: claims.iss || null,
+      exp: claims.exp || null,
+      expInSec: claims.exp ? Number(claims.exp) - nowEpoch : null
+    }
+  }));
 
   if (Array.isArray(skippedFields) && skippedFields.length) {
     console.warn('[SAP_PAYLOAD_SKIPPED_FIELDS]', JSON.stringify({
@@ -1374,19 +1440,17 @@ async function _postToS4AndPersist(tx, {
     status = Number(err?.response?.status || err?.statusCode || 500);
     responseBody = err?.response?.data ?? err?.data ?? { error: err?.message || 'S/4 POST failed' };
     errorHeaders = err?.response?.headers ?? err?.headers ?? null;
-    if (ppDebug) {
-      console.warn('[PP_DEBUG_ERROR]', JSON.stringify({
-        destinationName,
-        servicePath,
-        entitySet,
-        status,
-        message: String(err?.message || ''),
-        wwwAuthenticate:
-          err?.response?.headers?.['www-authenticate'] ||
-          err?.response?.headers?.['WWW-Authenticate'] ||
-          null
-      }));
-    }
+    console.warn('[PP_DEBUG_ERROR]', JSON.stringify({
+      destinationName,
+      servicePath,
+      entitySet,
+      status,
+      message: String(err?.message || ''),
+      wwwAuthenticate:
+        err?.response?.headers?.['www-authenticate'] ||
+        err?.response?.headers?.['WWW-Authenticate'] ||
+        null
+    }));
   }
 
   const correlationId = _extractCorrelationId(responseHeaders, errorHeaders);
@@ -1743,6 +1807,247 @@ async function _persistSkippedStepResult(tx, {
     status: 'SKIPPED',
     message: message || `Step ${sapTarget?.entitySet || sapTarget?.targetCode || 'UNKNOWN'} skipped`
   });
+}
+
+async function _postToS4AndPersistPrincipalPropagation(tx, {
+  req,
+  requestId,
+  processId,
+  processCode,
+  sapTarget,
+  payload,
+  userId,
+  previousStatus,
+  skippedFields = [],
+  updateRequestState = true,
+  emitErrorBusinessComment = true,
+  updateSubjectFromSap = false
+}) {
+  const destinationName = String(sapTarget?.destinationName || '').trim();
+  const servicePath = String(sapTarget?.servicePath || '').trim();
+  const entitySet = String(sapTarget?.entitySet || '').trim();
+  const sapTargetId = sapTarget?.id || null;
+  const jwt = _extractPrincipalPropagationJwtFromReq(req);
+  const claims = _decodeJwtPayloadUnsafe(jwt);
+  const nowEpoch = Math.floor(Date.now() / 1000);
+  console.info('[PP_DEBUG_REQUEST_NEW]', JSON.stringify({
+    destinationName,
+    servicePath,
+    entitySet,
+    hasJwt: Boolean(jwt),
+    tokenMask: _maskToken(jwt),
+    reqUserId: req?.user?.id || null,
+    hasAuthorizationHeader: Boolean(
+      req?.headers?.authorization ||
+      req?._?.req?.headers?.authorization ||
+      req?.http?.req?.headers?.authorization ||
+      cds?.context?.http?.req?.headers?.authorization
+    ),
+    hasForwardedAuthorizationHeader: Boolean(
+      req?.headers?.['x-forwarded-authorization'] ||
+      req?._?.req?.headers?.['x-forwarded-authorization'] ||
+      req?.http?.req?.headers?.['x-forwarded-authorization'] ||
+      cds?.context?.http?.req?.headers?.['x-forwarded-authorization']
+    ),
+    claims: {
+      user_name: claims.user_name || null,
+      login_name: claims.login_name || null,
+      email: claims.email || null,
+      sub: claims.sub || null,
+      user_id: claims.user_id || null,
+      origin: claims.origin || null,
+      iss: claims.iss || null,
+      exp: claims.exp || null,
+      expInSec: claims.exp ? Number(claims.exp) - nowEpoch : null
+    }
+  }));
+
+  if (Array.isArray(skippedFields) && skippedFields.length) {
+    console.warn('[SAP_PAYLOAD_SKIPPED_FIELDS]', JSON.stringify({
+      requestId,
+      processCode,
+      entitySet,
+      count: skippedFields.length,
+      skippedFields
+    }));
+  }
+
+  const url = `${servicePath.replace(/\/+$/, '')}/${entitySet}`;
+  let status = 500;
+  let responseBody = null;
+  let responseHeaders = null;
+  let errorHeaders = null;
+
+  try {
+    const s4pp = await cds.connect.to('S4H-PP');
+    const res = await s4pp.send({
+      method: 'POST',
+      path: url,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...(jwt ? { Authorization: `Bearer ${jwt}` } : {})
+      },
+      data: payload
+    });
+
+    status = Number(res?.statusCode || res?.status || 200);
+    responseBody = res?.data ?? res?.body ?? res ?? null;
+    responseHeaders = res?.headers ?? null;
+  } catch (err) {
+    status = Number(err?.response?.status || err?.statusCode || 500);
+    responseBody = err?.response?.data ?? err?.data ?? { error: err?.message || 'S/4 POST failed' };
+    errorHeaders = err?.response?.headers ?? err?.headers ?? null;
+    console.warn('[PP_DEBUG_ERROR_NEW]', JSON.stringify({
+      destinationName,
+      servicePath,
+      entitySet,
+      status,
+      message: String(err?.message || ''),
+      wwwAuthenticate:
+        err?.response?.headers?.['www-authenticate'] ||
+        err?.response?.headers?.['WWW-Authenticate'] ||
+        null
+    }));
+  }
+
+  const correlationId = _extractCorrelationId(responseHeaders, errorHeaders);
+  console.log('[SAP_POST_RESULT]', {
+    processCode,
+    entitySet,
+    status,
+    correlationId,
+    mode: 'principal-propagation'
+  });
+  const sapObjectKey = _extractSapObjectKey(responseBody);
+  const responseJson = _stringifySafe(responseBody) || '';
+
+  const ok = status >= 200 && status < 300;
+  await _upsertSapStepMessage(tx, {
+    requestId,
+    sapTargetId,
+    httpStatus: status,
+    correlationId,
+    sapObjectKey,
+    payload,
+    responseBody,
+    processCode,
+    targetCode: sapTarget?.targetCode || null,
+    entitySet,
+    status: _toStepStatus(ok),
+    message: _toStepMessage({
+      ok,
+      status: _toStepStatus(ok),
+      entitySet,
+      sapObjectKey,
+      sapErrorMessage: ok ? null : _extractSapErrorMessage(responseBody)
+    })
+  });
+  const finalStatus = ok ? STATUS_COMPLETED : STATUS.REWORK;
+  const currentHeaderRows = await tx.run(
+    `SELECT "SUBJECT_ID", "SUBJECT_TYPE"
+       FROM "MDG_REQUEST_HEADER"
+      WHERE "ID" = ?`,
+    [requestId]
+  );
+  const beforeSubjectId = currentHeaderRows?.[0]?.SUBJECT_ID ?? null;
+  const beforeSubjectType = currentHeaderRows?.[0]?.SUBJECT_TYPE ?? null;
+
+  if (updateRequestState) {
+    await tx.run(
+      `UPDATE "MDG_REQUEST_HEADER"
+          SET "STATUS" = ?,
+              "MODIFIEDAT" = ?,
+              "MODIFIEDBY" = ?
+        WHERE "ID" = ?`,
+      [finalStatus, new Date(), userId, requestId]
+    );
+    if (!areValuesEqual(previousStatus, finalStatus)) {
+      await insertRequestFieldChangeLog(tx, {
+        requestId,
+        fieldId: SYSTEM_FIELD_ID,
+        fieldCode: 'MDG_REQUEST_HEADER.STATUS',
+        oldValue: previousStatus,
+        newValue: finalStatus,
+        changeType: 'UPDATE',
+        changedBy: userId,
+        changedRole: ROLE_CODES.APPROVER,
+        source: 'WORKFLOW_APPROVE'
+      });
+    }
+  }
+
+  const subjectTypeByProcessCode = {
+    CUSTOMER_CREATION: 'CUSTOMER',
+    TRANSPORT_DRIVER_CREATION: 'DRIVER'
+  };
+  const subjectTypeForProcess = subjectTypeByProcessCode[String(processCode || '').trim().toUpperCase()] || null;
+
+  if (updateSubjectFromSap && sapObjectKey) {
+    const nextSubjectType = subjectTypeForProcess || beforeSubjectType || null;
+    await tx.run(
+      `UPDATE "MDG_REQUEST_HEADER"
+          SET "SUBJECT_ID" = ?,
+              "SUBJECT_TYPE" = ?,
+              "MODIFIEDAT" = ?,
+              "MODIFIEDBY" = ?
+        WHERE "ID" = ?`,
+      [sapObjectKey, nextSubjectType, new Date(), userId, requestId]
+    );
+    if (!areValuesEqual(beforeSubjectId, sapObjectKey)) {
+      await insertRequestFieldChangeLog(tx, {
+        requestId,
+        fieldId: SYSTEM_FIELD_ID,
+        fieldCode: 'MDG_REQUEST_HEADER.SUBJECT_ID',
+        oldValue: beforeSubjectId,
+        newValue: sapObjectKey,
+        changeType: 'UPDATE',
+        changedBy: userId,
+        changedRole: ROLE_CODES.APPROVER,
+        source: 'WORKFLOW_APPROVE'
+      });
+    }
+    if (!areValuesEqual(beforeSubjectType, nextSubjectType)) {
+      await insertRequestFieldChangeLog(tx, {
+        requestId,
+        fieldId: SYSTEM_FIELD_ID,
+        fieldCode: 'MDG_REQUEST_HEADER.SUBJECT_TYPE',
+        oldValue: beforeSubjectType,
+        newValue: nextSubjectType,
+        changeType: 'UPDATE',
+        changedBy: userId,
+        changedRole: ROLE_CODES.APPROVER,
+        source: 'WORKFLOW_APPROVE'
+      });
+    }
+  }
+
+  if (!ok && emitErrorBusinessComment) {
+    const sapErrorMessage = _extractSapErrorMessage(responseBody);
+    await insertComment(tx, {
+      requestId,
+      authorUser: userId,
+      authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
+      message: `Error SAP: ${sapErrorMessage}`
+    });
+    await insertActionLog(tx, {
+      requestId,
+      action: 'SAP_ERROR',
+      actorUser: userId,
+      actorRole: ROLE_CODES.APPROVER,
+      comment: sapErrorMessage
+    });
+  }
+
+  return {
+    ok,
+    status,
+    finalStatus,
+    correlationId,
+    sapObjectKey,
+    responseJson,
+    responseBody
+  };
 }
 
 function _parseResultEnvelope(responseJsonRaw) {

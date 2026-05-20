@@ -62,3 +62,8 @@ Content-Type: application/json
 {
   "servicePath": "/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS"
 }
+
+### metadata
+GET  {{server}}/mdg/VH_CustomerGen?$select=BusinessPartner%2CBusinessPartnerName&$top=200&$skip=0&fieldCode=KNVV.KUNNR&requestId=ef086528-ccb5-4724-a109-398ff9315f01
+{{credentials}}
+Content-Type: application/json
