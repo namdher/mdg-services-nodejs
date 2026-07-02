@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MDG - DS4 - Trace Principal Propagation - 09-06-2026</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5f6c7b;
+      --line: #d9e1ea;
+      --band: #f5f8fb;
+      --blue: #0b5cab;
+      --green: #147a50;
+      --red: #b42318;
+      --amber: #9a5b00;
+      --panel: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef3f7;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      background: var(--panel);
+      min-height: 100vh;
+      box-shadow: 0 18px 45px rgba(21, 35, 50, 0.12);
+    }
+
+    header {
+      padding: 34px 42px 28px;
+      color: #fff;
+      background: linear-gradient(135deg, #0b5cab 0%, #20364f 72%);
+    }
+
+    header p {
+      margin: 8px 0 0;
+      color: #dcecff;
+      max-width: 900px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      color: #17324d;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      color: #23364a;
+    }
+
+    section {
+      padding: 28px 42px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 4px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .ok {
+      border-left: 5px solid var(--green);
+    }
+
+    .warn {
+      border-left: 5px solid var(--amber);
+    }
+
+    .bad {
+      border-left: 5px solid var(--red);
+    }
+
+    .note {
+      padding: 14px 16px;
+      border: 1px solid #f0d28a;
+      border-left: 5px solid var(--amber);
+      border-radius: 6px;
+      background: #fff8e5;
+    }
+
+    .success {
+      padding: 14px 16px;
+      border: 1px solid #b7e1cc;
+      border-left: 5px solid var(--green);
+      border-radius: 6px;
+      background: #f0fbf5;
+    }
+
+    .danger {
+      padding: 14px 16px;
+      border: 1px solid #f3b7b0;
+      border-left: 5px solid var(--red);
+      border-radius: 6px;
+      background: #fff4f3;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #eef3f7;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 0.94em;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      color: #102033;
+      border: 1px solid #cbd6e2;
+      border-radius: 6px;
+      background: #f7fafc;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      vertical-align: top;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+    }
+
+    th {
+      background: var(--band);
+      color: #23364a;
+      font-weight: 700;
+    }
+
+    ol,
+    ul {
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 8px 0;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 760px) {
+      header,
+      section {
+        padding-left: 22px;
+        padding-right: 22px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Diagnostico DS4 - Principal Propagation X.509</h1>
+    <p>Revision del archivo <code>trace ds4.xlsx</code> para explicar por que el usuario es rechazado al invocar servicios OData en DS4 el 09 de junio de 2026.</p>
+    <div class="meta">
+      <span class="pill">Sistema: DS4</span>
+      <span class="pill">Cliente SAP: 120</span>
+      <span class="pill">Trace: dev_icm</span>
+      <span class="pill">Fecha evento: 09-06-2026</span>
+      <span class="pill">Usuario observado: fsoler@ccu.cl</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Resumen ejecutivo</h2>
+    <div class="grid">
+      <div class="card ok">
+        <strong>El X.509 del usuario si llega a DS4.</strong>
+        <p>El trace muestra el header <code>ssl_client_cert</code> y el certificado reenviado con subject <code>CN=fsoler@ccu.cl</code>.</p>
+      </div>
+      <div class="card bad">
+        <strong>DS4 no acepta ese certificado reenviado.</strong>
+        <p>ICM indica que la conexion HTTPS real no trae certificado cliente del intermediario y por seguridad elimina los headers SSL.</p>
+      </div>
+      <div class="card warn">
+        <strong>Resultado visible para la aplicacion.</strong>
+        <p>DS4 responde <code>HTTP/1.1 401 Unauthorized</code> en llamadas como <code>ZCDS_CLIENTES_GEN_CDS/$metadata</code>.</p>
+      </div>
+      <div class="card warn">
+        <strong>No parece un problema solo del usuario.</strong>
+        <p>El mismo patron aparece para <code>fsoler@ccu.cl</code> y <code>sergio.guaman@vacconsultores.cl</code>, tanto el 01-06-2026 como el 09-06-2026.</p>
+      </div>
+    </div>
+
+    <div class="danger" style="margin-top: 18px;">
+      <strong>Causa raiz probable:</strong>
+      DS4 no tiene correctamente establecida la confianza del intermediario que reenvia el certificado X.509 por header. Para Principal Propagation HTTPS, SAP requiere que el backend acepte certificados reenviados solo desde proxies/intermediarios confiables.
+    </div>
+  </section>
+
+  <section>
+    <h2>Evidencia del trace DS4</h2>
+    <p>Bloque observado el <strong>09-06-2026 16:38:30</strong> en <code>trace ds4.xlsx</code>:</p>
+    <pre>GET /sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS/$metadata HTTP/1.1
+user-agent: axios/1.13.5
+host: v-vhccuds4ci.sap.ccu.cl:44300
+ssl_client_cert: MIIFST...
+
+Client certificate info: no certificate received
+Forwarded Client certificate:
+  subject="CN=fsoler@ccu.cl, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL"
+  issuer ="CN=scc.ca, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL"
+
+HttpCertIsReverseProxyTrustworthy:
+  client did not sent any cert -> intermediate not trustworthy
+HttpIsReverseProxyTrustworthy:
+  intermediary is NOT trusted
+HTTP request [...] Reject untrusted forwarded certificate
+  (received via HTTPS without certificate)
+
+HttpModHandler: remove incoming ssl header
+HTTP/1.1 401 Unauthorized</pre>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Senal</th>
+          <th>Interpretacion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>ssl_client_cert</code> presente</td>
+          <td>La identidad X.509 fue propagada hasta DS4 como header HTTP.</td>
+        </tr>
+        <tr>
+          <td><code>Client certificate info: no certificate received</code></td>
+          <td>La conexion TLS hacia DS4 no presento un certificado cliente aceptado por ICM.</td>
+        </tr>
+        <tr>
+          <td><code>intermediary is NOT trusted</code></td>
+          <td>DS4 no reconoce al intermediario como reverse proxy confiable para reenviar certificados.</td>
+        </tr>
+        <tr>
+          <td><code>remove incoming ssl header</code></td>
+          <td>ICM elimina el certificado reenviado antes de que ABAP lo use para logon X.509.</td>
+        </tr>
+        <tr>
+          <td><code>401 Unauthorized</code></td>
+          <td>Al no quedar certificado valido para autenticacion, la llamada OData queda no autorizada.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Como debe funcionar</h2>
+    <ol>
+      <li>La aplicacion en BTP llama a una destination con <code>Authentication=PrincipalPropagation</code>.</li>
+      <li>El Connectivity Service y SAP Cloud Connector generan/propagan una identidad X.509 corta para el usuario autenticado.</li>
+      <li>Cloud Connector accede al backend DS4 por HTTPS y reenvia el certificado del usuario en headers SSL.</li>
+      <li>DS4 solo debe aceptar esos headers si el intermediario que los envia esta autenticado y configurado como proxy confiable.</li>
+      <li>Cuando DS4 confia en el intermediario, el certificado reenviado puede llegar al mecanismo de logon X.509 de ABAP y mapearse al usuario SAP.</li>
+    </ol>
+
+    <div class="note">
+      <strong>Punto exacto donde falla ahora:</strong>
+      el paso 4. DS4 ve el header del certificado de usuario, pero no confia en el intermediario porque la conexion HTTPS no trae certificado cliente del proxy, o ese certificado no esta declarado como reverse proxy confiable.
+    </div>
+  </section>
+
+  <section>
+    <h2>Paso a paso para corregirlo</h2>
+
+    <h3>1. Confirmar la ruta tecnica del flujo</h3>
+    <ul>
+      <li>Identificar si la llamada va <strong>BTP -> Connectivity Service -> Cloud Connector -> DS4</strong> directo, o si existe un SAP Web Dispatcher / balanceador entre Cloud Connector y DS4.</li>
+      <li>El componente que se conecta directamente a DS4 es el que DS4 debe reconocer como reverse proxy confiable.</li>
+      <li>En el trace aparece el host <code>v-vhccuds4ci.sap.ccu.cl:44300</code> y user-agent <code>axios/1.13.5</code>.</li>
+    </ul>
+
+    <h3>2. Revisar Cloud Connector</h3>
+    <ul>
+      <li>En el mapping del sistema DS4, verificar que el protocolo sea HTTPS si se usara Principal Propagation X.509.</li>
+      <li>Activar <strong>Allow Principal Propagation</strong>.</li>
+      <li>Configurar <strong>Principal Type = X.509 Certificate</strong>.</li>
+      <li>Seleccionar/usar el <strong>System Certificate</strong> del Cloud Connector para la conexion hacia el backend.</li>
+      <li>Exportar el certificado de sistema de Cloud Connector y su cadena emisora si aplica.</li>
+    </ul>
+
+    <h3>3. Importar la confianza en DS4</h3>
+    <ul>
+      <li>En DS4, entrar a <code>STRUST</code>.</li>
+      <li>Importar el certificado cliente del intermediario, normalmente el certificado de sistema de Cloud Connector, en el PSE que atiende HTTPS del ICM. En este trace se ve <code>/usr/sap/DS4/D00/sec/SAPSSLS.pse</code>.</li>
+      <li>Importar tambien la cadena CA necesaria para validar el certificado del intermediario.</li>
+      <li>Guardar/distribuir el PSE segun la practica Basis del landscape.</li>
+    </ul>
+
+    <h3>4. Declarar el intermediario como reverse proxy confiable</h3>
+    <p>Configurar en el perfil de DS4 un parametro vectorial <code>icm/trusted_reverse_proxy_&lt;n&gt;</code> usando el <strong>Subject</strong> y <strong>Issuer</strong> del certificado del intermediario, no el certificado del usuario final.</p>
+    <pre># Ejemplo conceptual. Los valores reales deben salir del certificado del Cloud Connector
+# o del SAP Web Dispatcher/balanceador que conecta directamente contra DS4.
+icm/trusted_reverse_proxy_0 =
+  SUBJECT="CN=&lt;certificado-del-intermediario&gt;, ..."
+  ISSUER="CN=&lt;CA-emisora-del-intermediario&gt;, ..."</pre>
+
+    <div class="note">
+      <strong>Importante:</strong>
+      no usar aqui <code>CN=fsoler@ccu.cl</code>. Ese es el certificado del usuario propagado. El parametro debe identificar al proxy/intermediario autorizado para reenviar certificados.
+    </div>
+
+    <h3>5. Reiniciar o recargar ICM segun ventana Basis</h3>
+    <ul>
+      <li>Aplicar el cambio de perfil segun el procedimiento de Basis.</li>
+      <li>Reiniciar ICM / instancia si el parametro no queda activo dinamicamente en el release correspondiente.</li>
+      <li>Repetir la llamada a <code>/sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS/$metadata</code> por la misma destination con Principal Propagation.</li>
+    </ul>
+
+    <h3>6. Validar el nuevo trace</h3>
+    <ul>
+      <li>Ya no debe aparecer <code>intermediary is NOT trusted</code>.</li>
+      <li>Ya no debe aparecer <code>Reject untrusted forwarded certificate</code>.</li>
+      <li>No debe eliminarse el header SSL con <code>remove incoming ssl header</code>.</li>
+      <li>La respuesta esperada para metadata debe dejar de ser <code>401 Unauthorized</code>.</li>
+    </ul>
+
+    <h3>7. Si despues aparece otro 401</h3>
+    <ul>
+      <li>Revisar mapeo de certificado a usuario ABAP, por ejemplo reglas de X.509 / CERTRULE segun la configuracion del sistema.</li>
+      <li>Verificar que el usuario SAP asociado exista, este desbloqueado y tenga autorizacion para el servicio OData.</li>
+      <li>Ese seria un segundo problema. El problema actual ocurre antes: DS4 descarta el certificado reenviado por falta de confianza del intermediario.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Validacion rapida para CCU</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Pregunta</th>
+          <th>Respuesta desde el trace</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Se esta enviando X.509?</td>
+          <td>Si. Se ve <code>ssl_client_cert</code> y el subject <code>CN=fsoler@ccu.cl</code>.</td>
+        </tr>
+        <tr>
+          <td>DS4 lo acepta?</td>
+          <td>No. Lo marca como certificado reenviado por intermediario no confiable.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Documentacion SAP de respaldo</h2>
+    <ul>
+      <li>
+        <a href="https://help.sap.com/docs/connectivity/sap-btp-connectivity-cf/principal-propagation" target="_blank" rel="noopener">
+          SAP Help - Principal Propagation
+        </a>:
+        explica el concepto de reenviar la identidad del usuario cloud hacia un sistema remoto mediante Connectivity y Cloud Connector.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/connectivity/sap-btp-connectivity-cf/configure-principal-propagation-for-https" target="_blank" rel="noopener">
+          SAP Help - Configure Identity Propagation for HTTPS
+        </a>:
+        indica que en el mapping de Cloud Connector se debe permitir Principal Propagation, elegir X.509 Certificate y usar System Certificate para HTTPS.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/connectivity/sap-btp-connectivity-cf/set-up-trust-for-principal-propagation" target="_blank" rel="noopener">
+          SAP Help - Set Up Trust for Principal Propagation
+        </a>:
+        cubre el establecimiento de confianza necesario para Principal Propagation hacia sistemas on-premise.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/ABAP_PLATFORM_NEW/683d6a1797a34730a6e005d1e8de6f22/3cd7c51625b1449ea16f80fa72854422.html" target="_blank" rel="noopener">
+          SAP Help - Certificate Forwarding Security Considerations
+        </a>:
+        documenta que los certificados reenviados deben aceptarse solo desde reverse proxies confiables.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/ABAP_PLATFORM_NEW/683d6a1797a34730a6e005d1e8de6f22/b321fd4385bf41a8b0fd17a944ed363e.html" target="_blank" rel="noopener">
+          SAP Help - icm/trusted_reverse_proxy_&lt;xx&gt;
+        </a>:
+        referencia del parametro ICM para declarar reverse proxies confiables.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/PRODUCT_ID/bd78479f4da741a59f5e2a418bd37908/b57a907f29f24fc3ace7756607d403d3.html" target="_blank" rel="noopener">
+          SAP Help - icm/HTTPS/trust_client_with_issuer
+        </a>:
+        documenta parametros historicos para subject/issuer del reverse proxy confiable en escenarios ICM/Web Dispatcher.
+      </li>
+      <li>
+        <a href="https://help.sap.com/docs/ABAP_PLATFORM_NEW/bd78479f4da741a59f5e2a418bd37908/49a51a6f01ea44c28407623eb46ffdee.html" target="_blank" rel="noopener">
+          SAP Help - icm/accept_forwarded_cert_via_http
+        </a>:
+        referencia de seguridad sobre aceptacion de certificados reenviados por HTTP. Para este caso la recomendacion es mantener HTTPS y confiar solo en el intermediario correcto.
+      </li>
+      <li>
+        <a href="https://userapps.support.sap.com/sap/support/knowledge/en/3017609" target="_blank" rel="noopener">
+          SAP KBA 3017609 - Reject untrusted forwarded certificate
+        </a>:
+        KBA especifica para el sintoma observado en el trace. Puede requerir usuario S-user.
+      </li>
+      <li>
+        <a href="https://userapps.support.sap.com/sap/support/knowledge/en/3371621" target="_blank" rel="noopener">
+          SAP KBA 3371621 - Common mistakes when setting ICM parameters
+        </a>:
+        KBA sobre errores comunes al configurar parametros ICM para Cloud Connector, SCC y backend ABAP. Puede requerir usuario S-user.
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Conclusion</h2>
+    <div class="success">
+      El certificado X.509 del usuario si se genera y llega hasta DS4. La falla esta en la confianza del intermediario que lo reenvia. Para resolverlo, DS4 debe confiar en el certificado cliente del Cloud Connector/Web Dispatcher/balanceador que conecta directamente contra ICM y debe declararlo como reverse proxy confiable mediante la configuracion ICM correspondiente.
+    </div>
+    <p class="small">Documento generado a partir de <code>trace ds4.xlsx</code> y revision del flujo MDG/BTP el 09-06-2026.</p>
+  </section>
+</main>
+</body>
+</html>

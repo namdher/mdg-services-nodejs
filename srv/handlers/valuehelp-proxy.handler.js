@@ -4,7 +4,7 @@ const { s4Get } = require('./_lib/s4.client');
 const { getQueryOptions, pickODataOptions, applyLocalFilter, applyLocalPaging } = require('./_lib/odata.util');
 
 const MAX_VH_CONTEXT_CHARS = Number(process.env.MDG_VH_MAX_CONTEXT_CHARS || 4000);
-const S4_DESTINATION_NAME = process.env.MDG_S4_DESTINATION || 'S4H-TECH';
+const S4_DESTINATION_NAME = 'S4H-TECH';
 const FAIL_FAST_ON_VH_METADATA = String(process.env.MDG_VH_FAIL_FAST || 'false').toLowerCase() === 'true';
 
 const _metadataEntitySetCache = new Map();
@@ -23,6 +23,18 @@ function _toCsvArray(value) {
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
+}
+
+function _escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function _mergeODataFilters(left, right) {
+  const a = String(left || '').trim();
+  const b = String(right || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  return `(${a}) and (${b})`;
 }
 
 function _hasFieldCaseInsensitive(row, fieldName) {
@@ -598,7 +610,7 @@ async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
   }
 
   if (depFilters.length) {
-    remoteQ.$filter = remoteQ.$filter ? `(${remoteQ.$filter}) and (${depFilters.join(' and ')})` : depFilters.join(' and ');
+    remoteQ.$filter = _mergeODataFilters(remoteQ.$filter, depFilters.join(' and '));
   }
 
   if (unresolvedRequired.length) {
@@ -704,6 +716,147 @@ function _dedupeByCatalogKey(rows, catalog) {
   return out;
 }
 
+function _catalogRouteFieldPairs(catalog, route) {
+  const localSearchFields = _toCsvArray(catalog?.VH_SEARCH_FIELDS);
+  const remoteSearchFields = _toCsvArray(route?.REMOTE_SEARCH_FIELDS);
+  const pairs = [
+    [catalog?.VH_KEY_FIELD, route?.REMOTE_KEY_FIELD],
+    [catalog?.VH_TEXT_FIELD, route?.REMOTE_TEXT_FIELD]
+  ];
+
+  localSearchFields.forEach((localField, idx) => {
+    pairs.push([localField, remoteSearchFields[idx] || localField]);
+  });
+
+  return pairs
+    .map(([localField, remoteField]) => [String(localField || '').trim(), String(remoteField || '').trim()])
+    .filter(([localField]) => localField);
+}
+
+function _buildRemoteFieldMap(catalog, route) {
+  const map = new Map();
+  for (const [localField, remoteField] of _catalogRouteFieldPairs(catalog, route)) {
+    const target = remoteField || localField;
+    map.set(localField.toLowerCase(), target);
+    map.set(target.toLowerCase(), target);
+  }
+  return map;
+}
+
+function _mapRemoteField(fieldMap, fieldName) {
+  const raw = String(fieldName || '').trim();
+  if (!raw) return '';
+  return fieldMap.get(raw.toLowerCase()) || raw;
+}
+
+function _isSimpleODataPropertyName(value) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || '').trim());
+}
+
+function _buildRemoteSelect(catalog, route) {
+  const fieldMap = _buildRemoteFieldMap(catalog, route);
+  const fields = [
+    _mapRemoteField(fieldMap, catalog?.VH_KEY_FIELD || route?.REMOTE_KEY_FIELD),
+    _mapRemoteField(fieldMap, catalog?.VH_TEXT_FIELD || route?.REMOTE_TEXT_FIELD)
+  ]
+    .map((field) => String(field || '').trim())
+    .filter((field) => _isSimpleODataPropertyName(field));
+
+  return Array.from(new Set(fields)).join(',');
+}
+
+function _translateLocalFilterToRemote(filterExpr, catalog, route) {
+  const original = String(filterExpr || '').trim();
+  if (!original) return '';
+
+  const fieldMap = _buildRemoteFieldMap(catalog, route);
+  let translated = original;
+  let touched = false;
+  let canTranslate = true;
+
+  translated = translated.replace(
+    /\bcontains\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*'((?:''|[^'])*)'\s*\)/gi,
+    (match, field, literal) => {
+      const remoteField = fieldMap.get(String(field || '').trim().toLowerCase());
+      if (!remoteField) {
+        canTranslate = false;
+        return match;
+      }
+      touched = true;
+      return `substringof('${literal}',${remoteField})`;
+    }
+  );
+
+  translated = translated.replace(
+    /\bsubstringof\(\s*'((?:''|[^'])*)'\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/gi,
+    (match, literal, field) => {
+      const remoteField = fieldMap.get(String(field || '').trim().toLowerCase());
+      if (!remoteField) {
+        canTranslate = false;
+        return match;
+      }
+      touched = true;
+      return `substringof('${literal}',${remoteField})`;
+    }
+  );
+
+  translated = translated.replace(
+    /\bstartswith\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*'((?:''|[^'])*)'\s*\)/gi,
+    (match, field, literal) => {
+      const remoteField = fieldMap.get(String(field || '').trim().toLowerCase());
+      if (!remoteField) {
+        canTranslate = false;
+        return match;
+      }
+      touched = true;
+      return `startswith(${remoteField},'${literal}')`;
+    }
+  );
+
+  for (const [localLower, remoteField] of fieldMap.entries()) {
+    const field = _escapeRegExp(localLower);
+    const re = new RegExp(`\\b(${field})\\s+eq\\s+((?:'(?:(?:'')|[^'])*')|[^\\s\\)]+)`, 'gi');
+    translated = translated.replace(re, (_, __, value) => {
+      touched = true;
+      return `${remoteField} eq ${value}`;
+    });
+  }
+
+  return touched && canTranslate ? translated : '';
+}
+
+function _buildRemoteSearchFilter(searchText, catalog, route) {
+  const term = String(searchText ?? '').trim().replace(/^"(.*)"$/, '$1');
+  if (!term) return '';
+
+  const fieldMap = _buildRemoteFieldMap(catalog, route);
+  const remoteSearchFields = _toCsvArray(route?.REMOTE_SEARCH_FIELDS);
+  const localSearchFields = _toCsvArray(catalog?.VH_SEARCH_FIELDS);
+  const fields = remoteSearchFields.length
+    ? remoteSearchFields
+    : localSearchFields.map((field) => _mapRemoteField(fieldMap, field));
+  const uniqueFields = Array.from(new Set(fields.map((field) => String(field || '').trim()).filter(Boolean)));
+  if (!uniqueFields.length) return '';
+
+  const literal = _escapeODataLiteral(term);
+  return uniqueFields.map((field) => `substringof('${literal}',${field})`).join(' or ');
+}
+
+function _applyCatalogRouteAliases(rows, catalog, route) {
+  const pairs = _catalogRouteFieldPairs(catalog, route);
+  if (!pairs.length) return rows;
+
+  return (rows || []).map((row) => {
+    const out = { ...row };
+    for (const [localField, remoteField] of pairs) {
+      if (!remoteField || localField === remoteField) continue;
+      if (_isEmptyValue(out[localField]) && !_isEmptyValue(out[remoteField])) out[localField] = out[remoteField];
+      if (_isEmptyValue(out[remoteField]) && !_isEmptyValue(out[localField])) out[remoteField] = out[localField];
+    }
+    return out;
+  });
+}
+
 function _logVhRequest({ fieldCode, vhName, route, depLogs, remoteFilter }) {
   console.info(
     `[VH_REQ] fieldCode=${fieldCode || '-'} vhEntitySet=${vhName} servicePath=${route?.SERVICE_PATH || ''} remoteEntitySet=${route?.REMOTE_ENTITYSET || ''} deps=${JSON.stringify(
@@ -712,7 +865,7 @@ function _logVhRequest({ fieldCode, vhName, route, depLogs, remoteFilter }) {
   );
 }
 
-function _buildRemoteQuery(q) {
+function _buildRemoteQuery(q, catalog, route) {
   const remoteQ = { ...q };
   // UI filter/search/select are usually local contract fields, not remote canonical names.
   delete remoteQ.$select;
@@ -720,6 +873,10 @@ function _buildRemoteQuery(q) {
   delete remoteQ.$search;
   delete remoteQ.search;
   delete remoteQ.q;
+
+  const remoteSelect = _buildRemoteSelect(catalog, route);
+  if (remoteSelect) remoteQ.$select = remoteSelect;
+
   return remoteQ;
 }
 
@@ -757,9 +914,31 @@ async function _readVhGeneric(req, vhName) {
     });
   }
 
-  await _validateRouteEntitySet(vhName, route);
+  try {
+    await _validateRouteEntitySet(vhName, route);
+  } catch (err) {
+    if (FAIL_FAST_ON_VH_METADATA || err?.code === 'VH_CONFIG_ERROR') {
+      throw err;
+    }
+    console.error(
+      JSON.stringify({
+        tag: 'VH_RUNTIME_METADATA_WARNING',
+        vhName,
+        servicePath: route.SERVICE_PATH,
+        remoteEntitySet: route.REMOTE_ENTITYSET,
+        reason: String(err?.message || err)
+      })
+    );
+  }
 
-  const remoteQ = _buildRemoteQuery(q);
+  const remoteQ = _buildRemoteQuery(q, catalog, route);
+  const remoteLocalFilter = _translateLocalFilterToRemote(localFilter, catalog, route);
+  const remoteSearchFilter = _buildRemoteSearchFilter(localSearch, catalog, route);
+  const remoteLocalCriteriaApplied = Boolean(
+    (!localFilter || remoteLocalFilter) && (!localSearch || remoteSearchFilter)
+  );
+  remoteQ.$filter = _mergeODataFilters(remoteLocalFilter, remoteSearchFilter);
+
   const dep = await _applyDependencyFilters(tx, req, vhName, catalog.FIELD_CODE, q, remoteQ);
   _logVhRequest({
     fieldCode: catalog.FIELD_CODE,
@@ -776,11 +955,12 @@ async function _readVhGeneric(req, vhName) {
     entitySet: String(route.REMOTE_ENTITYSET || '').trim(),
     query: remoteQ
   });
+  rows = _applyCatalogRouteAliases(rows, catalog, route);
   _validateRemotePayloadContract(vhName, rows, catalog, route);
 
-  if (localFilter) rows = applyLocalFilter(rows, localFilter);
-  if (localSearch) rows = _applyLocalSearch(rows, localSearch, _toCsvArray(catalog.VH_SEARCH_FIELDS));
-  if (localFilter || localSearch) rows = applyLocalPaging(rows, localTop, localSkip);
+  if (localFilter && !remoteLocalFilter) rows = applyLocalFilter(rows, localFilter);
+  if (localSearch && !remoteSearchFilter) rows = _applyLocalSearch(rows, localSearch, _toCsvArray(catalog.VH_SEARCH_FIELDS));
+  if ((localFilter || localSearch) && !remoteLocalCriteriaApplied) rows = applyLocalPaging(rows, localTop, localSkip);
 
   rows = _ensureEntityKeys(vhName, rows, catalog);
   rows = _dedupeByCatalogKey(rows, catalog);
@@ -868,7 +1048,7 @@ async function validateVhMappingsOnStartup() {
       }
     } catch (err) {
       const reason = `metadata fetch failed for '${servicePath}': ${String(err?.message || err)}`;
-      _vhInvalidMappings.set(vhName, reason);
+      if (FAIL_FAST_ON_VH_METADATA) _vhInvalidMappings.set(vhName, reason);
       console.error(
         JSON.stringify({
           tag: 'VH_STARTUP_METADATA_ERROR',

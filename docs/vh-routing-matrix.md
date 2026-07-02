@@ -41,7 +41,7 @@ No cross-domain service/entity fallback is applied at runtime.
 | VH_MaterialSalesOrg | `/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS` | `I_SalesOrganization` | `SalesOrganization` | `SalesOrganization_Text` | `SalesOrganization,SalesOrganization_Text` |
 | VH_MaterialVtweg | `/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS` | `I_DistributionChainCountry` | `ProductDistributionChnl` | `ProductDistributionChnl_Text` | `ProductDistributionChnl,ProductDistributionChnl_Text,ProductSalesOrg` |
 | VH_MaterialKtgrm | `/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS` | `Z_I_MatAccountAssignment_VH` | `AcctAssignmentGroup` | `Description` | `AcctAssignmentGroup,Description` |
-| VH_DriverGen | `/sap/opu/odata/sap/ZCDS_CONDUCTORES_GEN_CDS` | `zcds_conductores_gen` | `Kunnr` | `Name1` | `Kunnr,Name1,Name2` |
+| VH_DriverGen | `/sap/opu/odata/sap/ZCDS_CONDUCTORES_GEN_CDS` | `zcds_conductores_gen` | `Kunnr` | `Name1Text` | `Kunnr,Name1Text` |
 | VH_DriverRol | `/sap/opu/odata/sap/ZCDS_CONDUCTORES_ROL_CDS` | `zcds_conductores_rol` | `Kunnr` | `Kunnr` | `Kunnr,Bp_Role,Dfval` |
 | VH_DriverCom | `/sap/opu/odata/sap/ZCDS_CONDUCTORES_COM_CDS` | `zcds_conductores_com` | `Kunnr` | `Kunnr` | `Kunnr,Vkorg,Vtweg,Spart` |
 | VH_DriverImp | `/sap/opu/odata/sap/ZCDS_CONDUCTORES_IMP_CDS` | `zcds_conductores_imp` | `Aland/Tatyp` | `Aland/Tatyp` | `Aland,Tatyp` |
@@ -87,6 +87,8 @@ No cross-domain service/entity fallback is applied at runtime.
 - `VH_DestMercBP` / `VH_DestFactBP`:
   - `BusinessPartner` <- `Kunnr` (when backend alias is customer format)
   - `BusinessPartnerName` <- `Name1` (optional UX text)
+- `VH_DriverGen`:
+  - `Name1` <- `Name1Text`
 - `VH_DestFactSalesOrg`:
   - `SalesOrganization_Text` mapped from backend name/text variants
 - `VH_DestFactVtweg`:

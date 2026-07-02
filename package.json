@@ -93,13 +93,6 @@
           "requestTimeout": 30000
         }
       },
-      "S4H-PP": {
-        "kind": "odata-v2",
-        "credentials": {
-          "destination": "S4H-PP",
-          "requestTimeout": 30000
-        }
-      },
       "IAS_SCIM": {
         "kind": "rest",
         "credentials": {

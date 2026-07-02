@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MDG - CCU - Proyecto - Revision principal progation 01062026</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5f6c7b;
+      --line: #d9e1ea;
+      --band: #f5f8fb;
+      --blue: #0b5cab;
+      --green: #147a50;
+      --red: #b42318;
+      --amber: #9a5b00;
+      --panel: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef3f7;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.48;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      background: var(--panel);
+      min-height: 100vh;
+      box-shadow: 0 18px 45px rgba(21, 35, 50, 0.12);
+    }
+
+    header {
+      padding: 34px 42px 28px;
+      color: #fff;
+      background: linear-gradient(135deg, #0b5cab 0%, #20364f 72%);
+    }
+
+    header p {
+      margin: 8px 0 0;
+      color: #dcecff;
+      max-width: 900px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      color: #17324d;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      color: #23364a;
+    }
+
+    section {
+      padding: 28px 42px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 4px;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      font-size: 13px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 16px;
+      background: #fff;
+    }
+
+    .card strong {
+      color: #1e344c;
+    }
+
+    .ok {
+      border-left: 5px solid var(--green);
+    }
+
+    .warn {
+      border-left: 5px solid var(--amber);
+    }
+
+    .bad {
+      border-left: 5px solid var(--red);
+    }
+
+    .info {
+      border-left: 5px solid var(--blue);
+    }
+
+    .diagram {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--band);
+      padding: 20px;
+    }
+
+    svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .trace {
+      overflow-x: auto;
+      margin: 12px 0 0;
+      padding: 14px;
+      border-radius: 6px;
+      color: #e8eef5;
+      background: #16212d;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 12px;
+      white-space: pre;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: #20364f;
+      background: #ecf3fa;
+    }
+
+    ul,
+    ol {
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: #edf2f7;
+      color: #20364f;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    .callout {
+      margin: 14px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfe;
+    }
+
+    .figure-title {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    @media (max-width: 760px) {
+      header,
+      section {
+        padding-left: 22px;
+        padding-right: 22px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>MDG - CCU - Proyecto - Revision principal progation 01062026</h1>
+    <p>Recap de la revisión realizada el 01-06-2026 sobre Principal Propagation X.509 entre CF, Cloud Connector y SAP ABAP DS4 cliente 120.</p>
+    <div class="meta">
+      <span class="pill">Proyecto MDG Services Node.js</span>
+      <span class="pill">Subaccount CCU-CF-DEV</span>
+      <span class="pill">Backend DS4 / mandante 120</span>
+      <span class="pill">Evidencia: Trace.xlsx</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>Resumen Ejecutivo</h2>
+    <div class="grid">
+      <div class="card ok">
+        <strong>Lo que ya funciona</strong>
+        <p>La app en Cloud Foundry envía el JWT del usuario al Connectivity Proxy. Cloud Connector ya recibe identidad de usuario y genera un certificado X.509 de usuario.</p>
+      </div>
+      <div class="card bad">
+        <strong>Bloqueo principal</strong>
+        <p>ABAP DS4 recibe el certificado reenviado en <code>ssl_client_cert</code>, pero lo descarta porque no confía en el intermediario que lo envía.</p>
+      </div>
+      <div class="card info">
+        <strong>FSOLER</strong>
+        <p>En el trace no aparece <code>P000001</code> como CN de certificado. Para FSOLER, SCC está reenviando <code>CN=fsoler@ccu.cl</code>, que calza con la regla CERTRULE basada en correo.</p>
+      </div>
+      <div class="card warn">
+        <strong>Acción de Basis</strong>
+        <p>Configurar trust del Cloud Connector/reverse proxy en ABAP, incluyendo certificado de sistema del SCC y parámetros ICM de reverse proxy confiable.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Flujo Revisado</h2>
+    <div class="diagram" aria-label="Diagrama del flujo de principal propagation">
+      <svg width="980" height="220" viewBox="0 0 980 220" role="img">
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#0b5cab"></path>
+          </marker>
+        </defs>
+        <rect x="20" y="45" width="150" height="80" rx="6" fill="#ffffff" stroke="#9bb7d3"></rect>
+        <text x="95" y="76" text-anchor="middle" font-size="15" fill="#17324d">Usuario</text>
+        <text x="95" y="100" text-anchor="middle" font-size="13" fill="#5f6c7b">IAS / AD</text>
+
+        <rect x="220" y="45" width="160" height="80" rx="6" fill="#ffffff" stroke="#9bb7d3"></rect>
+        <text x="300" y="76" text-anchor="middle" font-size="15" fill="#17324d">App MDG</text>
+        <text x="300" y="100" text-anchor="middle" font-size="13" fill="#5f6c7b">CF / Node.js</text>
+
+        <rect x="430" y="45" width="170" height="80" rx="6" fill="#ffffff" stroke="#9bb7d3"></rect>
+        <text x="515" y="76" text-anchor="middle" font-size="15" fill="#17324d">Connectivity</text>
+        <text x="515" y="100" text-anchor="middle" font-size="13" fill="#5f6c7b">Proxy BTP</text>
+
+        <rect x="650" y="45" width="160" height="80" rx="6" fill="#ffffff" stroke="#9bb7d3"></rect>
+        <text x="730" y="76" text-anchor="middle" font-size="15" fill="#17324d">Cloud Connector</text>
+        <text x="730" y="100" text-anchor="middle" font-size="13" fill="#5f6c7b">X.509 user cert</text>
+
+        <rect x="860" y="45" width="120" height="80" rx="6" fill="#fff6f6" stroke="#d7776e"></rect>
+        <text x="920" y="76" text-anchor="middle" font-size="15" fill="#17324d">ABAP DS4</text>
+        <text x="920" y="100" text-anchor="middle" font-size="13" fill="#b42318">Descarta cert</text>
+
+        <line x1="170" y1="85" x2="220" y2="85" stroke="#0b5cab" stroke-width="2" marker-end="url(#arrow)"></line>
+        <line x1="380" y1="85" x2="430" y2="85" stroke="#0b5cab" stroke-width="2" marker-end="url(#arrow)"></line>
+        <line x1="600" y1="85" x2="650" y2="85" stroke="#0b5cab" stroke-width="2" marker-end="url(#arrow)"></line>
+        <line x1="810" y1="85" x2="860" y2="85" stroke="#b42318" stroke-width="2" marker-end="url(#arrow)"></line>
+
+        <text x="300" y="155" text-anchor="middle" font-size="13" fill="#5f6c7b">JWT usuario</text>
+        <text x="515" y="155" text-anchor="middle" font-size="13" fill="#5f6c7b">SAP-Connectivity-Authentication</text>
+        <text x="730" y="155" text-anchor="middle" font-size="13" fill="#5f6c7b">ssl_client_cert: CN=email</text>
+        <text x="920" y="155" text-anchor="middle" font-size="13" fill="#b42318">Proxy no confiable</text>
+      </svg>
+    </div>
+    <p class="small">Diagrama elaborado a partir de la revisión de logs y trace. No se encontraron capturas de pantalla como archivo local en el repositorio; se incorporan visuales embebidos y evidencia textual real.</p>
+  </section>
+
+  <section>
+    <h2>Hallazgos de la Actividad</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Hallazgo</th>
+          <th>Evidencia</th>
+          <th>Interpretación</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Cloud Connector ya muestra usuario</td>
+          <td>En monitor SCC se observaron requests con usuario, por ejemplo <code>P000001</code>.</td>
+          <td>La identidad viaja desde IAS/CF hacia SCC. Esto es una mejora frente al estado anterior, donde el usuario aparecía vacío.</td>
+        </tr>
+        <tr>
+          <td>El token contiene usuario IAS/AD</td>
+          <td>Log de CF con <code>user_name=P000001</code> y <code>email=fsoler@ccu.cl</code>.</td>
+          <td><code>P000001</code> puede ser el identificador IAS/AD. No necesariamente debe existir como usuario SAP si el mapping final es por correo.</td>
+        </tr>
+        <tr>
+          <td>SCC genera certificado de usuario con email</td>
+          <td>Trace: <code>subject="CN=fsoler@ccu.cl..."</code>.</td>
+          <td>Para FSOLER, el certificado reenviado tiene el CN correcto para una CERTRULE que mapea CN a correo electrónico.</td>
+        </tr>
+        <tr>
+          <td>ABAP descarta el certificado reenviado</td>
+          <td><code>Reject untrusted forwarded certificate</code> y <code>remove incoming ssl header</code>.</td>
+          <td>DS4 no confía en el intermediario/reverse proxy que envía <code>ssl_client_cert</code>. El certificado del usuario no llega a CERTRULE.</td>
+        </tr>
+        <tr>
+          <td>Respuesta final 401 Basic</td>
+          <td><code>HTTP/1.1 401 Unauthorized</code> y <code>www-authenticate: Basic</code>.</td>
+          <td>Al eliminarse el certificado, ABAP no puede autenticar por X.509 y cae a desafío Basic.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Evidencia del Trace</h2>
+    <p class="figure-title">Extracto 1 - certificado de FSOLER reenviado por SCC</p>
+    <pre class="trace">Forwarded Client certificate:
+subject="CN=fsoler@ccu.cl, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL",
+issuer="CN=scc.ca, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL"</pre>
+
+    <p class="figure-title">Extracto 2 - ABAP no recibió certificado TLS del intermediario</p>
+    <pre class="trace">Client certificate info: no certificate received
+HttpCertIsReverseProxyTrustworthy: client did not sent any cert -> intermediate not trustworthy
+HttpIsReverseProxyTrustworthy: intermediary is NOT trusted</pre>
+
+    <p class="figure-title">Extracto 3 - ABAP elimina el header de certificado y rechaza la propagación</p>
+    <pre class="trace">HTTP request [...] Reject untrusted forwarded certificate
+(received via HTTPS without certificate):
+subject="CN=fsoler@ccu.cl, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL",
+issuer="CN=scc.ca, L=Santiago, OU=IT, O=CCU, SP=Santiago, C=CL"
+
+HttpModGetDefRules: intermediary is NOT trusted -> remove SSL header fields
+HttpModHandler: remove incoming ssl header</pre>
+
+    <p class="figure-title">Extracto 4 - resultado HTTP</p>
+    <pre class="trace">HTTP/1.1 401 Unauthorized
+sap-system: DS4
+www-authenticate: Basic realm="SAP NetWeaver Application Server [DS4/120]"</pre>
+  </section>
+
+  <section>
+    <h2>Lectura del Caso P000001 / FSOLER</h2>
+    <div class="callout">
+      <p><strong>Conclusión:</strong> el bloqueo no parece ser que <code>P000001</code> no exista en SAP. En el trace, para FSOLER, el certificado que ABAP recibe como reenviado tiene <code>CN=fsoler@ccu.cl</code>.</p>
+      <p>La regla CERTRULE vista durante la revisión toma <code>Asunto / CN</code> y entra al sistema con <code>Correo electrónico</code>. Por lo tanto, si el usuario SAP <code>FSOLER</code> tiene mantenido en SU01 el correo <code>fsoler@ccu.cl</code>, el mapping debería resolver una vez que ABAP acepte el certificado reenviado.</p>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Elemento</th>
+          <th>Valor observado</th>
+          <th>Significado</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Usuario en JWT / SCC monitor</td>
+          <td><code>P000001</code></td>
+          <td>Identidad IAS/AD o atributo de login mostrado por SCC.</td>
+        </tr>
+        <tr>
+          <td>Email en JWT</td>
+          <td><code>fsoler@ccu.cl</code></td>
+          <td>Atributo que SCC usa para generar el CN del certificado de usuario.</td>
+        </tr>
+        <tr>
+          <td>Certificado reenviado</td>
+          <td><code>CN=fsoler@ccu.cl</code></td>
+          <td>Dato que CERTRULE usa para buscar usuario SAP por correo.</td>
+        </tr>
+        <tr>
+          <td>Usuario SAP esperado</td>
+          <td><code>FSOLER</code></td>
+          <td>Debe existir en SU01, estar activo y tener correo único <code>fsoler@ccu.cl</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Qué Debe Implementar Basis</h2>
+    <ol>
+      <li>Identificar el certificado de sistema del Cloud Connector que se usa para autenticarse frente al backend ABAP. No es el certificado de usuario <code>CN=fsoler@ccu.cl</code>; es el certificado del proxy/SCC.</li>
+      <li>Importar en <code>STRUST</code> la CA/cadena que firma ese certificado de sistema del SCC. Validar el PSE asociado al puerto HTTPS <code>44300</code>, por ejemplo <code>SSL server Standard</code> o el PSE indicado por el perfil/trace.</li>
+      <li>Configurar el reverse proxy confiable en el perfil de instancia ABAP, usando el subject e issuer del certificado de sistema del SCC.</li>
+      <li>Verificar que el puerto HTTPS donde entra SCC solicite certificado cliente. En el trace se observó <code>PORT=44300, PROT=HTTPS, VCLIENT=1</code>, lo que indica solicitud opcional de certificado; debe mantenerse alineado con la política del sistema.</li>
+      <li>Reiniciar ICM con <code>SMICM -> Administration -> ICM -> Restart -> Soft</code> o aplicar el procedimiento Basis equivalente.</li>
+      <li>Repetir la prueba y confirmar que el trace ya no muestre <code>Reject untrusted forwarded certificate</code> ni <code>remove incoming ssl header</code>.</li>
+      <li>Validar <code>CERTRULE</code> y <code>SU01</code>: usuario <code>FSOLER</code> activo, correo <code>fsoler@ccu.cl</code> mantenido y sin duplicados.</li>
+    </ol>
+
+    <h3>Parámetro ICM Esperado</h3>
+    <pre class="trace">icm/trusted_reverse_proxy_0 = SUBJECT="&lt;Subject DN del certificado de sistema del SCC&gt;",
+                              ISSUER="&lt;Issuer DN de la CA que firma el certificado SCC&gt;"</pre>
+    <p class="small">El subject/issuer debe corresponder al certificado del Cloud Connector como proxy, no al certificado del usuario final.</p>
+  </section>
+
+  <section>
+    <h2>Checklist de Validación Posterior</h2>
+    <div class="grid">
+      <div class="card info">
+        <strong>Trace esperado</strong>
+        <ul>
+          <li>No aparece <code>intermediary is NOT trusted</code>.</li>
+          <li>No aparece <code>remove incoming ssl header</code>.</li>
+          <li>El certificado reenviado permanece disponible para autenticación.</li>
+        </ul>
+      </div>
+      <div class="card info">
+        <strong>Autenticación esperada</strong>
+        <ul>
+          <li>ABAP aplica CERTRULE.</li>
+          <li><code>CN=fsoler@ccu.cl</code> resuelve al usuario SAP <code>FSOLER</code>.</li>
+          <li>El OData responde sin desafío <code>Basic</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Notas de Aplicación</h2>
+    <p>Durante la revisión también se observó que <code>srv/handlers/s4-metadata.handler.js</code> usa una destination hardcodeada <code>S4H-TECH</code>, mientras el cliente S/4 principal usa <code>S4H-PP</code>. Esto no cambia el hallazgo Basis del trace, pero puede confundir pruebas comparativas entre metadata y value helps.</p>
+    <p>El flujo de value helps como <code>VH_DestMercBP</code> termina llamando a S/4 vía SAP Cloud SDK con destination y principal propagation. La URL remota revisada fue:</p>
+    <pre class="trace">GET /sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS/$metadata
+GET /sap/opu/odata/sap/ZCDS_CLIENTES_GEN_CDS/I_BusinessPartner?$top=50</pre>
+  </section>
+
+  <section>
+    <h2>Referencias SAP</h2>
+    <ul>
+      <li><a href="https://help.sap.com/docs/ABAP_PLATFORM_NEW/683d6a1797a34730a6e005d1e8de6f22/3cd7c51625b1449ea16f80fa72854422.html">SAP Help - Certificate forwarding / SSL client certificate security</a></li>
+      <li><a href="https://help.sap.com/docs/ABAP_PLATFORM_NEW/bd78479f4da741a59f5e2a418bd37908/b321fd4385bf41a8b0fd17a944ed363e.html">SAP Help - Profile parameter icm/trusted_reverse_proxy_&lt;xx&gt;</a></li>
+      <li><a href="https://help.sap.com/docs/connectivity/sap-btp-connectivity-cf/principal-propagation">SAP Help - SAP BTP Connectivity: Principal Propagation</a></li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

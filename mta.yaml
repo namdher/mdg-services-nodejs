@@ -38,6 +38,8 @@ modules:
       memory: 4096M
       disk-quota: 4096M
       buildpack: nodejs_buildpack
+    properties:
+      MDG_VH_FAIL_FAST: "false"
 
   - name: mdg-services-nodejs-db-deployer
     type: hdb
