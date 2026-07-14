@@ -809,7 +809,7 @@ function _isSimpleODataPropertyName(value) {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value || '').trim());
 }
 
-function _buildRemoteSelect(catalog, route) {
+function _buildRemoteSelect(vhName, catalog, route) {
   const fieldMap = _buildRemoteFieldMap(catalog, route);
   const fields = [
     _mapRemoteField(fieldMap, catalog?.VH_KEY_FIELD || route?.REMOTE_KEY_FIELD),
@@ -817,6 +817,10 @@ function _buildRemoteSelect(catalog, route) {
   ]
     .map((field) => String(field || '').trim())
     .filter((field) => _isSimpleODataPropertyName(field));
+
+  if (vhName === 'VH_DriverGen') {
+    fields.push('Transportista', 'TransportistaName');
+  }
 
   return Array.from(new Set(fields)).join(',');
 }
@@ -921,7 +925,7 @@ function _logVhRequest({ fieldCode, vhName, route, depLogs, remoteFilter }) {
   );
 }
 
-function _buildRemoteQuery(q, catalog, route) {
+function _buildRemoteQuery(q, catalog, route, vhName = '') {
   const remoteQ = { ...q };
   // UI filter/search/select are usually local contract fields, not remote canonical names.
   delete remoteQ.$select;
@@ -930,7 +934,7 @@ function _buildRemoteQuery(q, catalog, route) {
   delete remoteQ.search;
   delete remoteQ.q;
 
-  const remoteSelect = _buildRemoteSelect(catalog, route);
+  const remoteSelect = _buildRemoteSelect(vhName, catalog, route);
   if (remoteSelect) remoteQ.$select = remoteSelect;
 
   return remoteQ;
@@ -995,6 +999,13 @@ async function _applyCompanyCodeRestrictions(tx, vhName, rows, { requestId, proc
   return filtered;
 }
 
+function _applyDriverGenRestrictions(vhName, rows) {
+  if (String(vhName || '') !== 'VH_DriverGen') return rows;
+
+  // ABAP prefilters TM0001 conductors; Transportista is populated from BUT050/CRMS01.
+  return (rows || []).filter((row) => !_isEmptyValue(row?.Transportista));
+}
+
 async function _readVhGeneric(req, vhName) {
   const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
@@ -1046,7 +1057,7 @@ async function _readVhGeneric(req, vhName) {
     );
   }
 
-  const remoteQ = _buildRemoteQuery(q, catalog, route);
+  const remoteQ = _buildRemoteQuery(q, catalog, route, vhName);
   const remoteLocalFilter = _translateLocalFilterToRemote(localFilter, catalog, route);
   const remoteSearchFilter = _buildRemoteSearchFilter(localSearch, catalog, route);
   const remoteLocalCriteriaApplied = Boolean(
@@ -1075,6 +1086,7 @@ async function _readVhGeneric(req, vhName) {
     query: remoteQ
   });
   rows = _applyCatalogRouteAliases(rows, catalog, route);
+  rows = _applyDriverGenRestrictions(vhName, rows);
   rows = await _applyCompanyCodeRestrictions(tx, vhName, rows, {
     requestId,
     processCode
