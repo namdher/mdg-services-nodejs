@@ -416,8 +416,8 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
         AND fcc."FIELD_ID" = fc."ID"
         AND fcc."COUNTRY_CODE" = ?
       WHERE pb."PROCESS_ID" = ?
-        AND ob."BLOCK_CODE" = 'CUST_DESTMERC_GEN'
-        AND fc."FIELD_CODE" LIKE 'BUT000-KNA1.%'
+        AND ob."BLOCK_CODE" = 'CUST_GEN_DESTMERC'
+        AND fc."FIELD_CODE" = 'KNA1.SORTL'
         AND fc."SAP_FIELD" IS NOT NULL
         AND LENGTH(TRIM(fc."SAP_FIELD")) > 0`,
     [requesterRoleId, requesterRoleId, request.COUNTRY_CODE, request.PROCESS_ID]
@@ -431,13 +431,7 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
       control: Number(r.EFFECTIVE_CONTROL)
     }))
     .filter((r) => r.fieldId && r.fieldCode && r.sapField)
-    .filter((r) => [
-      'BUT000-KNA1.KUNNR',
-      'BUT000-KNA1.NAMORG1',
-      'BUT000-KNA1.NAMORG3',
-      'BUT000-KNA1.SORTL',
-      'BUT000-KNA1.MCOD2'
-    ].includes(r.fieldCode));
+    .filter((r) => r.fieldCode === 'KNA1.SORTL');
   if (!targetFields.length) return 0;
 
   const existingRows = await tx.run(
@@ -460,10 +454,13 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
   const ts = now();
   for (const field of targetFields) {
     const current = existingByFieldId.get(field.fieldId);
-    const currentValue = String(current?.VALUE || '').trim();
-    const nextValue = field.fieldCode === 'BUT000-KNA1.KUNNR'
-      ? resolvedKunnr
-      : String(payloadBySapField.get(normalizeSapField(field.sapField)) || '').trim();
+    const nextValue = String(
+      payloadBySapField.get(normalizeSapField(field.sapField))
+      || payloadBySapField.get('TAXNUMBER1')
+      || payloadBySapField.get('BUSINESSPARTNERSEARCHTERM1')
+      || payloadBySapField.get('SEARCHTERM1')
+      || ''
+    ).trim();
     if (!nextValue) continue;
     if (areValuesEqual(current?.VALUE ?? null, nextValue)) continue;
 
@@ -497,13 +494,6 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
     });
     changed += 1;
   }
-
-  await syncRequestSubjectFromRequestValue(tx, {
-    requestId,
-    fieldId: targetFields.find((r) => r.fieldCode === 'BUT000-KNA1.KUNNR')?.fieldId,
-    rawValue: resolvedKunnr,
-    userId
-  });
 
   return changed;
 }
@@ -1145,7 +1135,7 @@ async function afterUpsertRequestValue(_, req) {
       roleCode: audit.roleCode || ROLE_CODES.REQUESTER
     });
   }
-  if (triggerFieldCode === 'BUT000-KNA1.KUNNR') {
+  if (triggerFieldCode === 'KNA1.KUNNR') {
     await syncDestMercCreationFromCustomerRef(tx, {
       requestId: audit.requestId,
       rawValue: req.data?.VALUE,
