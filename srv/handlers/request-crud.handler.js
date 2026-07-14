@@ -77,12 +77,14 @@ async function syncRequestSubjectFromRequestValue(tx, { requestId, fieldId, rawV
   if (!isCustomerKunnrField(fieldCode)) return;
 
   const requestRows = await tx.run(
-    `SELECT "SUBJECT_NAME"
-       FROM "MDG_REQUEST_HEADER"
-      WHERE "ID" = ?`,
+    `SELECT r."SUBJECT_NAME" AS "SUBJECT_NAME", p."PROCESS_CODE" AS "PROCESS_CODE"
+       FROM "MDG_REQUEST_HEADER" r
+       JOIN "MDG_PROCESS" p ON p."ID" = r."PROCESS_ID"
+      WHERE r."ID" = ?`,
     [requestId]
   );
   const currentSubjectName = requestRows?.[0]?.SUBJECT_NAME ?? null;
+  const isCustomerCreation = String(requestRows?.[0]?.PROCESS_CODE || '').trim().toUpperCase() === 'CUSTOMER_CREATION';
 
   let resolvedSubjectName = null;
   try {
@@ -99,7 +101,13 @@ async function syncRequestSubjectFromRequestValue(tx, { requestId, fieldId, rawV
             "MODIFIEDAT" = ?,
             "MODIFIEDBY" = ?
       WHERE "ID" = ?`,
-    [value, resolvedSubjectName || currentSubjectName, now(), userId, requestId]
+    [
+      value,
+      isCustomerCreation ? normalizeUppercaseInput(resolvedSubjectName || currentSubjectName) : (resolvedSubjectName || currentSubjectName),
+      now(),
+      userId,
+      requestId
+    ]
   );
 }
 
@@ -162,6 +170,21 @@ function normalizeRequestValueInput(value) {
   } catch (_err) {
     return String(value);
   }
+}
+
+function normalizeUppercaseInput(value) {
+  return typeof value === 'string' ? value.toLocaleUpperCase('es-CL') : value;
+}
+
+async function isProcessCode(tx, processId, expectedCode) {
+  if (!processId || !expectedCode) return false;
+  const rows = await tx.run(
+    `SELECT "PROCESS_CODE"
+       FROM "MDG_PROCESS"
+      WHERE "ID" = ?`,
+    [processId]
+  );
+  return String(rows?.[0]?.PROCESS_CODE || '').trim().toUpperCase() === String(expectedCode).trim().toUpperCase();
 }
 
 function normalizeSapField(value) {
@@ -773,6 +796,11 @@ async function beforeCreateRequest(req) {
     processCode = processRows?.[0]?.PROCESS_CODE || null;
   }
 
+  if (String(processCode || '').trim().toUpperCase() === 'CUSTOMER_CREATION'
+      && Object.prototype.hasOwnProperty.call(req.data || {}, 'SUBJECT_NAME')) {
+    req.data.SUBJECT_NAME = normalizeUppercaseInput(req.data.SUBJECT_NAME);
+  }
+
   const assignments = await getUserRoleAssignments(tx, req, {
     processId: req.data.PROCESS_ID,
     countryCode: req.data.COUNTRY_CODE
@@ -855,6 +883,11 @@ async function beforeUpdateRequest(req) {
   const current = await getRequestById(tx, requestId);
   if (!current) req.reject(404, `Request not found: ${requestId}`);
   if (current.ISDELETED) req.reject(409, 'Request is deleted');
+
+  if (Object.prototype.hasOwnProperty.call(req.data || {}, 'SUBJECT_NAME')
+      && await isProcessCode(tx, current.PROCESS_ID, 'CUSTOMER_CREATION')) {
+    req.data.SUBJECT_NAME = normalizeUppercaseInput(req.data.SUBJECT_NAME);
+  }
 
   const currentStatus = normalizeStatus(current.STATUS);
   const assignments = await getUserRoleAssignments(tx, req, {
@@ -1071,6 +1104,10 @@ async function beforeUpsertRequestValue(req) {
   }
 
   const fieldCode = await getFieldCodeById(tx, fieldId);
+  if (String(fieldCode || '').trim().toUpperCase() === 'KNA1.NAMORG1'
+      && await isProcessCode(tx, request.PROCESS_ID, 'CUSTOMER_CREATION')) {
+    req.data.VALUE = normalizeUppercaseInput(req.data.VALUE);
+  }
   const lineNo = req.data?.LINE_NO ?? req._requestValueAudit?.lineNo ?? 1;
   req._requestValueAudit = {
     ...(req._requestValueAudit || {}),
