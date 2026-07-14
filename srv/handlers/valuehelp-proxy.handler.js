@@ -775,13 +775,21 @@ function _dedupeByCatalogKey(rows, catalog) {
 function _catalogRouteFieldPairs(catalog, route) {
   const localSearchFields = _toCsvArray(catalog?.VH_SEARCH_FIELDS);
   const remoteSearchFields = _toCsvArray(route?.REMOTE_SEARCH_FIELDS);
+  const localKey = String(catalog?.VH_KEY_FIELD || '').trim();
+  const localText = String(catalog?.VH_TEXT_FIELD || '').trim();
+  const remoteKey = String(route?.REMOTE_KEY_FIELD || '').trim();
+  const remoteText = String(route?.REMOTE_TEXT_FIELD || '').trim();
   const pairs = [
-    [catalog?.VH_KEY_FIELD, route?.REMOTE_KEY_FIELD],
-    [catalog?.VH_TEXT_FIELD, route?.REMOTE_TEXT_FIELD]
+    [localKey, remoteKey],
+    [localText, remoteText]
   ];
 
   localSearchFields.forEach((localField, idx) => {
-    pairs.push([localField, remoteSearchFields[idx] || localField]);
+    const local = String(localField || '').trim();
+    let remote = String(remoteSearchFields[idx] || '').trim();
+    if (!remote && local && local === localKey) remote = remoteKey;
+    if (!remote && local && local === localText) remote = remoteText;
+    pairs.push([local, remote || local]);
   });
 
   return pairs
