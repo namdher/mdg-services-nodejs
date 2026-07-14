@@ -9,6 +9,7 @@ const FAIL_FAST_ON_VH_METADATA = String(process.env.MDG_VH_FAIL_FAST || 'false')
 
 const _metadataEntitySetCache = new Map();
 const _vhInvalidMappings = new Map();
+const ALLOWED_CHILE_COMPANY_CODES = new Set(['A023', 'A032', 'A050', 'A071', 'A080', 'A090', 'A096']);
 
 function _escapeODataLiteral(value) {
   return String(value ?? '').replace(/'/g, "''");
@@ -576,7 +577,18 @@ async function _resolveDependencyValue(tx, dep, contextMap, requestId) {
 }
 
 async function _applyDependencyFilters(tx, req, vhName, fieldCode, q, remoteQ) {
-  const deps = await _loadVhDependencies(tx, fieldCode);
+  const rawDeps = await _loadVhDependencies(tx, fieldCode);
+  const seenDependencies = new Set();
+  const deps = rawDeps.filter((dep) => {
+    const dependencyKey = [
+      String(dep?.DEPENDS_ON_FIELD_CODE || '').trim().toUpperCase(),
+      String(dep?.VH_PROPERTY_NAME || '').trim().toUpperCase()
+    ].join('|');
+
+    if (seenDependencies.has(dependencyKey)) return false;
+    seenDependencies.add(dependencyKey);
+    return true;
+  });
   if (!deps.length) return { missingRequired: false, resolvedDepLogs: [] };
 
   const contextMap = _getContextInput(req, q);
@@ -880,6 +892,65 @@ function _buildRemoteQuery(q, catalog, route) {
   return remoteQ;
 }
 
+const STATIC_VH_FILTERS = {
+  VH_OwnerBP: [`BusinessPartnerRole eq 'CRM010'`],
+  VH_TransportistaBP: [`BusinessPartnerRole eq 'CRM010'`]
+};
+
+async function _readRequestSubjectId(tx, requestId) {
+  if (!requestId) return '';
+  const rows = await tx.run(
+    `SELECT "SUBJECT_ID"
+       FROM "MDG_REQUEST_HEADER"
+      WHERE "ID" = ?`,
+    [requestId]
+  );
+  return String(rows?.[0]?.SUBJECT_ID || '').trim();
+}
+
+async function _loadExistingCustomerCompanies(customerId) {
+  const kunnr = String(customerId || '').trim();
+  if (!kunnr) return new Set();
+  const rows = await s4Get({
+    servicePath: '/sap/opu/odata/sap/ZCDS_CLIENTES_EMP_CDS',
+    entitySet: 'zcds_clientes_emp',
+    query: {
+      $select: 'Kunnr,Bukrs,CompanyCode',
+      $filter: `Kunnr eq '${_escapeODataLiteral(kunnr)}'`,
+      $top: 200
+    }
+  });
+  const existing = new Set();
+  for (const row of rows || []) {
+    const code = String(row?.Bukrs || row?.CompanyCode || '').trim();
+    if (code) existing.add(code);
+  }
+  return existing;
+}
+
+async function _applyCompanyCodeRestrictions(tx, vhName, rows, { requestId, processCode }) {
+  if (!['VH_CustomerSoc', 'VH_DestMercSoc'].includes(String(vhName || ''))) return rows;
+
+  let filtered = (rows || []).filter((row) => {
+    const code = String(row?.CompanyCode || row?.Bukrs || '').trim();
+    return code && ALLOWED_CHILE_COMPANY_CODES.has(code);
+  });
+
+  const process = String(processCode || '').trim().toUpperCase();
+  if (vhName === 'VH_CustomerSoc' && requestId && process === 'CUSTOMER_EXTEND_COMPANYCODE') {
+    const customerId = await _readRequestSubjectId(tx, requestId);
+    if (customerId) {
+      const existing = await _loadExistingCustomerCompanies(customerId);
+      filtered = filtered.filter((row) => {
+        const code = String(row?.CompanyCode || row?.Bukrs || '').trim();
+        return code && !existing.has(code);
+      });
+    }
+  }
+
+  return filtered;
+}
+
 async function _readVhGeneric(req, vhName) {
   const tx = cds.tx(req);
   const q = pickODataOptions(getQueryOptions(req));
@@ -938,6 +1009,10 @@ async function _readVhGeneric(req, vhName) {
     (!localFilter || remoteLocalFilter) && (!localSearch || remoteSearchFilter)
   );
   remoteQ.$filter = _mergeODataFilters(remoteLocalFilter, remoteSearchFilter);
+  remoteQ.$filter = _mergeODataFilters(
+    remoteQ.$filter,
+    (STATIC_VH_FILTERS[vhName] || []).join(' and ')
+  );
 
   const dep = await _applyDependencyFilters(tx, req, vhName, catalog.FIELD_CODE, q, remoteQ);
   _logVhRequest({
@@ -956,6 +1031,10 @@ async function _readVhGeneric(req, vhName) {
     query: remoteQ
   });
   rows = _applyCatalogRouteAliases(rows, catalog, route);
+  rows = await _applyCompanyCodeRestrictions(tx, vhName, rows, {
+    requestId,
+    processCode
+  });
   _validateRemotePayloadContract(vhName, rows, catalog, route);
 
   if (localFilter && !remoteLocalFilter) rows = applyLocalFilter(rows, localFilter);
@@ -1084,8 +1163,14 @@ module.exports = {
   readCustomerSpart: expose('VH_CustomerSpart'),
   readCustomerLzone: expose('VH_CustomerLzone'),
   readCustomerRegion: expose('VH_CustomerRegion'),
+  readCountry: expose('VH_Country'),
+  readOwnerBp: expose('VH_OwnerBP'),
+  readTransportistaBp: expose('VH_TransportistaBP'),
   readCustomerPaymentCondition: expose('VH_CustomerPaymentCondition'),
   readCustomerBzirk: expose('VH_CustomerBzirk'),
+  readSalesGroup: expose('VH_SalesGroup'),
+  readSalesOffice: expose('VH_SalesOffice'),
+  readCustomerGroup8: expose('VH_CustomerGroup8'),
   readCustomerDunningArea: expose('VH_CustomerDunningArea'),
   readDestMercBP: expose('VH_DestMercBP'),
   readDestMercOrgV: expose('VH_DestMercOrgV'),

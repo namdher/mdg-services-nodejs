@@ -193,6 +193,23 @@ service MDGService @(path:'/mdg') {
     ProvincialTaxCode               : String(30);
   }
 
+  @cds.persistence.skip @readonly entity VH_Country {
+    key Country                     : String(3);
+    Country_Text                    : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_OwnerBP {
+    key BusinessPartner             : String(10);
+    key BusinessPartnerRole         : String(6);
+    BusinessPartnerName             : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_TransportistaBP {
+    key BusinessPartner             : String(10);
+    key BusinessPartnerRole         : String(6);
+    BusinessPartnerName             : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_CustomerPaymentCondition {
     key PaymentCondition            : String(4);
     PaymentCondition_Text           : String(120);
@@ -202,6 +219,24 @@ service MDGService @(path:'/mdg') {
   @cds.persistence.skip @readonly entity VH_CustomerBzirk {
     key SalesDistrict               : String(6);
     SalesDistrict_Text              : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_SalesGroup {
+    key SalesGroup                  : String(3);
+    SalesGroup_Text                 : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_SalesOffice {
+    key SalesOffice                 : String(4);
+    SalesOrganization               : String(4);
+    DistributionChannel             : String(2);
+    OrganizationDivision            : String(2);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup8 {
+    key CustomerGroup8              : String(3);
+    CustomerGroup8Name              : String(20);
+    SalesOrganization               : String(4);
   }
 
   @cds.persistence.skip @readonly entity VH_DestMercBP {
@@ -335,9 +370,10 @@ service MDGService @(path:'/mdg') {
   }
 
   @cds.persistence.skip @readonly entity VH_DriverGen {
-    key Kunnr   : String(10);
-    Name1       : String(80);
-    Name2       : String(80);
+    key Kunnr               : String(10);
+    Name1Text               : String(80);
+    Transportista           : String(10);
+    TransportistaName       : String(81);
   }
 
   @cds.persistence.skip @readonly entity VH_DriverRol {
@@ -671,6 +707,7 @@ annotate MDGService.VH_AllowedProcesses with {
   PROCESS_CODE @Common.Label: 'Código Proceso';
   NAME @Common.Label: 'Proceso';
   FRONT_CODE @UI.Hidden: true;
+  FRONT_CODE @Common.Label: 'Frente';
 };
 
 annotate MDGService.RequestFieldChangeLogs with @UI.LineItem: [
@@ -714,4 +751,452 @@ annotate MDGService.RequestFieldChangeLogs with {
   SOURCE @UI.Hidden: true;
   SOURCE @Common.Label: 'Origen';
   SOURCE_TEXT @Common.Label: 'Origen';
+};
+
+annotate MDGService.VH_CustomerGen with {
+  BusinessPartner @Common.Label: 'Socio comercial';
+  BusinessPartnerName @Common.Label: 'Nombre';
+  BusinessPartnerCategory @Common.Label: 'Categoría';
+  Kunnr @Common.Label: 'Cliente';
+  Partner @Common.Label: 'Socio';
+  Name1 @Common.Label: 'Razón social';
+};
+
+annotate MDGService.VH_CustomerOrgV with {
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  SalesOrganization_Text @Common.Label: 'Descripción';
+  Kunnr @Common.Label: 'Cliente';
+  Vtweg @Common.Label: 'Canal';
+  VtwegText @Common.Label: 'Descripción canal';
+  Spart @Common.Label: 'Sector';
+  SpartText @Common.Label: 'Descripción sector';
+};
+
+annotate MDGService.VH_CustomerVtweg with {
+  ProductDistributionChnl @Common.Label: 'Canal de distribución';
+  ProductSalesOrg @Common.Label: 'Organización de ventas';
+  Country @Common.Label: 'País';
+};
+
+annotate MDGService.VH_CustomerSpart with {
+  Division @Common.Label: 'Sector';
+  Division_Text @Common.Label: 'Descripción';
+  DivisionOID @Common.Label: 'Identificador';
+};
+
+annotate MDGService.VH_CustomerSoc with {
+  CompanyCode @Common.Label: 'Sociedad';
+  CompanyCodeName @Common.Label: 'Nombre de sociedad';
+  Kunnr @Common.Label: 'Cliente';
+  Maber @Common.Label: 'Área de reclamación';
+  MaberText @Common.Label: 'Descripción área';
+  DunningArea @Common.Label: 'Área de reclamación';
+  DunningArea_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerDunningArea with {
+  DunningArea @Common.Label: 'Área de reclamación';
+  DunningArea_Text @Common.Label: 'Descripción';
+  CompanyCode @Common.Label: 'Sociedad';
+};
+
+annotate MDGService.VH_CustomerCom with {
+  Kunnr @Common.Label: 'Cliente';
+  Parnr @Common.Label: 'Socio';
+  Name1 @Common.Label: 'Razón social';
+  SMTP_ADDR @Common.Label: 'Correo electrónico';
+  TEL_NUMBER @Common.Label: 'Teléfono';
+};
+
+annotate MDGService.VH_CustomerEmp with {
+  Kunnr @Common.Label: 'Cliente';
+  Bukrs @Common.Label: 'Sociedad';
+  Ekorg @Common.Label: 'Organización de compras';
+  Vkorg @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_CustomerBan with {
+  Kunnr @Common.Label: 'Cliente';
+  Banks @Common.Label: 'País banco';
+  Bankl @Common.Label: 'Banco';
+  Bankn @Common.Label: 'Cuenta bancaria';
+  EbppAccname @Common.Label: 'Titular';
+  Country @Common.Label: 'País';
+  Country_Text @Common.Label: 'Descripción país';
+  Bank @Common.Label: 'Banco';
+  BankInternalID @Common.Label: 'ID banco';
+};
+
+annotate MDGService.VH_CustomerImp with {
+  Kunnr @Common.Label: 'Cliente';
+  Aland @Common.Label: 'País';
+  Tatyp @Common.Label: 'Clave';
+};
+
+annotate MDGService.VH_CustomerLzone with {
+  TransportZone @Common.Label: 'Zona de transporte';
+  TransportZoneDescription @Common.Label: 'Descripción';
+  CountryCode @Common.Label: 'País';
+  TransportZone_Text @Common.Label: 'Texto';
+};
+
+annotate MDGService.VH_CustomerRegion with {
+  Region @Common.Label: 'Región';
+  Region_Text @Common.Label: 'Descripción';
+  ProvincialTaxCode @Common.Label: 'Código fiscal provincial';
+};
+
+annotate MDGService.VH_Country with {
+  Country @Common.Label: 'País';
+  Country_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_OwnerBP with {
+  BusinessPartner @Common.Label: 'Socio comercial';
+  BusinessPartnerRole @Common.Label: 'Rol';
+  BusinessPartnerName @Common.Label: 'Nombre';
+};
+
+annotate MDGService.VH_TransportistaBP with {
+  BusinessPartner @Common.Label: 'Transportista';
+  BusinessPartnerRole @Common.Label: 'Rol';
+  BusinessPartnerName @Common.Label: 'Nombre transportista';
+};
+
+annotate MDGService.VH_CustomerPaymentCondition with {
+  PaymentCondition @Common.Label: 'Condición de pago';
+  PaymentCondition_Text @Common.Label: 'Descripción';
+  PaymentTerms @Common.Label: 'Términos de pago';
+};
+
+annotate MDGService.VH_CustomerBzirk with {
+  SalesDistrict @Common.Label: 'Distrito de ventas';
+  SalesDistrict_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_SalesGroup with {
+  SalesGroup @Common.Label: 'Grupo de vendedores';
+  SalesGroup_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_SalesOffice with {
+  SalesOffice @Common.Label: 'Oficina de ventas';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  DistributionChannel @Common.Label: 'Canal de distribución';
+  OrganizationDivision @Common.Label: 'Sector';
+};
+
+annotate MDGService.VH_CustomerGroup8 with {
+  CustomerGroup8 @Common.Label: 'Nivel de imagen';
+  CustomerGroup8Name @Common.Label: 'Descripción';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_DestMercBP with {
+  BusinessPartner @Common.Label: 'Socio comercial';
+  BusinessPartnerCategory @Common.Label: 'Categoría';
+  BusinessPartnerName @Common.Label: 'Nombre';
+};
+
+annotate MDGService.VH_DestMercOrgV with {
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  SalesOrganization_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercVtweg with {
+  ProductDistributionChnl @Common.Label: 'Canal de distribución';
+  ProductSalesOrg @Common.Label: 'Organización de ventas';
+  Country @Common.Label: 'País';
+};
+
+annotate MDGService.VH_DestMercSpart with {
+  Division @Common.Label: 'Sector';
+  Division_Text @Common.Label: 'Descripción';
+  DivisionOID @Common.Label: 'Identificador';
+};
+
+annotate MDGService.VH_DestMercBzirk with {
+  SalesDistrict @Common.Label: 'Distrito de ventas';
+  SalesDistrict_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercSoc with {
+  CompanyCode @Common.Label: 'Sociedad';
+  CompanyCodeName @Common.Label: 'Nombre de sociedad';
+};
+
+annotate MDGService.VH_DestMercDunningArea with {
+  DunningArea @Common.Label: 'Área de reclamación';
+  DunningArea_Text @Common.Label: 'Descripción';
+  CompanyCode @Common.Label: 'Sociedad';
+};
+
+annotate MDGService.VH_DestMercPaymentCondition with {
+  PaymentCondition @Common.Label: 'Condición de pago';
+  PaymentCondition_Text @Common.Label: 'Descripción';
+  PaymentTerms @Common.Label: 'Términos de pago';
+};
+
+annotate MDGService.VH_DestMercImp with {
+  Aland @Common.Label: 'País';
+  Tatyp @Common.Label: 'Clave';
+};
+
+annotate MDGService.VH_DestFactBP with {
+  BusinessPartner @Common.Label: 'Socio comercial';
+  BusinessPartnerCategory @Common.Label: 'Categoría';
+  BusinessPartnerName @Common.Label: 'Nombre';
+};
+
+annotate MDGService.VH_DestFactSalesOrg with {
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  SalesOrganization_Text @Common.Label: 'Descripción';
+  SalesOrganizationCurrency @Common.Label: 'Moneda';
+  CompanyCode @Common.Label: 'Sociedad';
+};
+
+annotate MDGService.VH_DestFactVtweg with {
+  ProductDistributionChnl @Common.Label: 'Canal de distribución';
+  Country @Common.Label: 'País';
+  ProductSalesOrg @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_DestMercBanks with {
+  Country @Common.Label: 'País';
+  Country_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercBank with {
+  Bank @Common.Label: 'Banco';
+  BankInternalID @Common.Label: 'ID banco';
+  BankCountry @Common.Label: 'País banco';
+};
+
+annotate MDGService.VH_DestMercLzone with {
+  TransportZone @Common.Label: 'Zona de transporte';
+  CountryCode @Common.Label: 'País';
+  TransportZoneDescription @Common.Label: 'Descripción';
+  TransportZone_Text @Common.Label: 'Texto';
+};
+
+annotate MDGService.VH_DestMercRegion with {
+  Region @Common.Label: 'Región';
+  Region_Text @Common.Label: 'Descripción';
+  Country @Common.Label: 'País';
+};
+
+annotate MDGService.VH_CustomerNif with {
+  Kunnr @Common.Label: 'Cliente';
+  Taxtype @Common.Label: 'Tipo de impuesto';
+};
+
+annotate MDGService.VH_CustomerClassification with {
+  CustomerClassification @Common.Label: 'Clasificación';
+  CustomerClassification_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_MaterialProduct with {
+  Material @Common.Label: 'Material';
+  Material_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_MaterialSalesOrg with {
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  SalesOrganization_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_MaterialVtweg with {
+  ProductDistributionChnl @Common.Label: 'Canal de distribución';
+  ProductSalesOrg @Common.Label: 'Organización de ventas';
+  Country @Common.Label: 'País';
+};
+
+annotate MDGService.VH_MaterialKtgrm with {
+  AcctAssignmentGroup @Common.Label: 'Grupo de imputación';
+  Description @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_MaterialUoM with {
+  UnitOfMeasure @Common.Label: 'Unidad de medida';
+  UnitOfMeasure_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DriverGen with {
+  Kunnr @Common.Label: 'Conductor';
+  Name1Text @Common.Label: 'Nombre';
+  Transportista @Common.Label: 'Transportista';
+  TransportistaName @Common.Label: 'Nombre transportista';
+};
+
+annotate MDGService.VH_DriverRol with {
+  Kunnr @Common.Label: 'Conductor';
+  Bp_Role @Common.Label: 'Rol BP';
+  Role @Common.Label: 'Rol';
+  Dfval @Common.Label: 'Valor por defecto';
+  ValidFrom @Common.Label: 'Válido desde';
+};
+
+annotate MDGService.VH_DriverCom with {
+  Kunnr @Common.Label: 'Conductor';
+  Vkorg @Common.Label: 'Organización de ventas';
+  Vtweg @Common.Label: 'Canal';
+  Spart @Common.Label: 'Sector';
+  Ernam @Common.Label: 'Creado por';
+  Erdat @Common.Label: 'Fecha de creación';
+};
+
+annotate MDGService.VH_DriverImp with {
+  Kunnr @Common.Label: 'Conductor';
+  Aland @Common.Label: 'País';
+  Tatyp @Common.Label: 'Clave';
+  Taxkd @Common.Label: 'Clasificación';
+};
+
+annotate MDGService.VH_DriverNif with {
+  Kunnr @Common.Label: 'Conductor';
+  Taxtype @Common.Label: 'Tipo de impuesto';
+  Taxnum @Common.Label: 'Número fiscal';
+  Taxnumxl @Common.Label: 'Número fiscal largo';
+};
+
+annotate MDGService.VH_DriverAdi with {
+  Kunnr @Common.Label: 'Conductor';
+  Driver_Group @Common.Label: 'Grupo de conductores';
+  ShortDriverId @Common.Label: 'ID corto';
+};
+
+annotate MDGService.VH_BillToGen with {
+  Kunnr @Common.Label: 'Destinatario de factura';
+  Name1 @Common.Label: 'Nombre';
+  Name2 @Common.Label: 'Nombre 2';
+};
+
+annotate MDGService.VH_BillToCom with {
+  Kunnr @Common.Label: 'Destinatario de factura';
+  Vkorg @Common.Label: 'Organización de ventas';
+  Vtweg @Common.Label: 'Canal';
+  Spart @Common.Label: 'Sector';
+  Ernam @Common.Label: 'Creado por';
+  Erdat @Common.Label: 'Fecha de creación';
+};
+
+annotate MDGService.VH_BillToImp with {
+  Kunnr @Common.Label: 'Destinatario de factura';
+  Aland @Common.Label: 'País';
+  Tatyp @Common.Label: 'Clave';
+  Taxkd @Common.Label: 'Clasificación';
+};
+
+annotate MDGService.VH_ShipToGen with {
+  Kunnr @Common.Label: 'Destinatario de mercadería';
+  Name1 @Common.Label: 'Nombre';
+  Name2 @Common.Label: 'Nombre 2';
+};
+
+annotate MDGService.VH_ShipToCom with {
+  Kunnr @Common.Label: 'Destinatario de mercadería';
+  Vkorg @Common.Label: 'Organización de ventas';
+  Vtweg @Common.Label: 'Canal';
+  Spart @Common.Label: 'Sector';
+  Ernam @Common.Label: 'Creado por';
+  Erdat @Common.Label: 'Fecha de creación';
+};
+
+annotate MDGService.VH_Resources with {
+  Resuid @Common.Label: 'Recurso';
+  Simversid @Common.Label: 'Versión simulación';
+  Simsessid @Common.Label: 'Sesión simulación';
+  Name @Common.Label: 'Nombre';
+  ResourceGroup @Common.Label: 'Grupo de recursos';
+};
+
+annotate MDGService.VH_ResourceTransportationType with {
+  TransportationType @Common.Label: 'Clase de transporte';
+  Description @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_ResourceLocation with {
+  LocationNumber @Common.Label: 'Ubicación';
+  LocationType @Common.Label: 'Tipo de ubicación';
+  Description @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_BU_GROUP with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_TAXKD with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_Boolean with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_TATYP with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_BU_GROUP with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_KTOKD with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_ANRED with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_BPKIND with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_KUKLA with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_TIME_ZONE with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_LANGU_CORR with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_DEFLT_COMM with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_ZZBKVID with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_MAHNA with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_MABER with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_Internal_MAHNS with {
+  CODE @Common.Label: 'Código';
+  TEXT @Common.Label: 'Descripción';
 };

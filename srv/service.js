@@ -31,8 +31,14 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_CustomerSpart', vh.readCustomerSpart);
   this.on('READ', 'VH_CustomerLzone', vh.readCustomerLzone);
   this.on('READ', 'VH_CustomerRegion', vh.readCustomerRegion);
+  this.on('READ', 'VH_Country', vh.readCountry);
+  this.on('READ', 'VH_OwnerBP', vh.readOwnerBp);
+  this.on('READ', 'VH_TransportistaBP', vh.readTransportistaBp);
   this.on('READ', 'VH_CustomerPaymentCondition', vh.readCustomerPaymentCondition);
   this.on('READ', 'VH_CustomerBzirk', vh.readCustomerBzirk);
+  this.on('READ', 'VH_SalesGroup', vh.readSalesGroup);
+  this.on('READ', 'VH_SalesOffice', vh.readSalesOffice);
+  this.on('READ', 'VH_CustomerGroup8', vh.readCustomerGroup8);
   this.on('READ', 'VH_CustomerDunningArea', vh.readCustomerDunningArea);
   this.on('READ', 'VH_DestMercBP', vh.readDestMercBP);
   this.on('READ', 'VH_DestMercOrgV', vh.readDestMercOrgV);

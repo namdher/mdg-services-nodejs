@@ -80,8 +80,11 @@ function resolveSubjectStrategy(subjectFieldCode) {
   if (normalized === 'BUT000.PARTNER') {
     return { type: 'PARTNER', genKeyCandidates: ['Partner', 'BusinessPartner'] };
   }
+  if (/\.SORTL$/i.test(normalized)) {
+    return { type: 'SORTL', genKeyCandidates: ['Sortl', 'TaxNumber1'] };
+  }
   if (/\.KUNNR$/i.test(normalized)) {
-    return { type: 'KUNNR', genKeyCandidates: ['Kunnr'] };
+    return { type: 'KUNNR', genKeyCandidates: ['Kunnr', 'Sortl'] };
   }
   return null;
 }
@@ -403,4 +406,8 @@ async function prefillCustomer(req) {
   return JSON.stringify({ ok: true, updated });
 }
 
-module.exports = { prefillCustomer };
+module.exports = {
+  prefillCustomer,
+  fetchCustomerPayloadBySubject,
+  isCustomerSubjectField
+};

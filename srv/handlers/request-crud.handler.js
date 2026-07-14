@@ -22,6 +22,7 @@ const {
   areValuesEqual,
   insertRequestFieldChangeLog
 } = require('./_lib/request-change-log.util');
+const { fetchCustomerPayloadBySubject } = require('./prefill.handler');
 
 function getEntityId(req) {
   return req.data?.ID || req.params?.[0]?.ID;
@@ -263,7 +264,7 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
       defaultValue: String(r.EFFECTIVE_DEFAULT || '').trim()
     }))
     .filter((r) => r.fieldId && r.fieldCode && r.sapField)
-    .filter((r) => r.control === FIELD_CONTROL.READ_ONLY)
+    .filter((r) => [FIELD_CONTROL.READ_ONLY, FIELD_CONTROL.HIDDEN].includes(r.control))
     .filter((r) => !r.defaultValue);
   if (!destFields.length) return 0;
 
@@ -366,6 +367,150 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
   return changed;
 }
 
+async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, userId }) {
+  const refValue = String(rawValue || '').trim();
+  if (!requestId || !refValue) return 0;
+
+  const reqRows = await tx.run(
+    `SELECT r."PROCESS_ID" AS "PROCESS_ID", r."COUNTRY_CODE" AS "COUNTRY_CODE", p."PROCESS_CODE" AS "PROCESS_CODE"
+       FROM "MDG_REQUEST_HEADER" r
+       JOIN "MDG_PROCESS" p ON p."ID" = r."PROCESS_ID"
+      WHERE r."ID" = ?`,
+    [requestId]
+  );
+  const request = reqRows?.[0];
+  if (!request || String(request.PROCESS_CODE || '').trim().toUpperCase() !== 'DESTMERC_CREATION') return 0;
+
+  const requesterRoleId = await getRequesterRoleId(tx, request.PROCESS_ID);
+  if (!requesterRoleId) return 0;
+
+  let payload = {};
+  try {
+    payload = await fetchCustomerPayloadBySubject({
+      subjectId: refValue,
+      subjectFieldCode: 'KNA1.KUNNR'
+    });
+  } catch (err) {
+    console.warn(`[DM_CREATION_PREFILL] customer lookup failed for ref=${refValue}: ${err?.message || err}`);
+    return 0;
+  }
+
+  const resolvedKunnr = String(payload?.Kunnr || payload?.KUNNR || '').trim();
+  if (!resolvedKunnr) return 0;
+
+  const destRows = await tx.run(
+    `SELECT DISTINCT
+        fc."ID" AS "FIELD_ID",
+        fc."FIELD_CODE" AS "FIELD_CODE",
+        fc."SAP_FIELD" AS "SAP_FIELD",
+        COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) AS "EFFECTIVE_CONTROL"
+       FROM "MDG_PROCESS_BLOCK" pb
+       JOIN "MDG_OBJECT_BLOCK" ob
+         ON ob."ID" = pb."BLOCK_ID"
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = bf."FIELD_ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = ?
+        AND fcb."FIELD_ID" = fc."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = ?
+        AND fcc."FIELD_ID" = fc."ID"
+        AND fcc."COUNTRY_CODE" = ?
+      WHERE pb."PROCESS_ID" = ?
+        AND ob."BLOCK_CODE" = 'CUST_DESTMERC_GEN'
+        AND fc."FIELD_CODE" LIKE 'BUT000-KNA1.%'
+        AND fc."SAP_FIELD" IS NOT NULL
+        AND LENGTH(TRIM(fc."SAP_FIELD")) > 0`,
+    [requesterRoleId, requesterRoleId, request.COUNTRY_CODE, request.PROCESS_ID]
+  );
+
+  const targetFields = (destRows || [])
+    .map((r) => ({
+      fieldId: String(r.FIELD_ID || '').trim(),
+      fieldCode: String(r.FIELD_CODE || '').trim(),
+      sapField: String(r.SAP_FIELD || '').trim(),
+      control: Number(r.EFFECTIVE_CONTROL)
+    }))
+    .filter((r) => r.fieldId && r.fieldCode && r.sapField)
+    .filter((r) => [
+      'BUT000-KNA1.KUNNR',
+      'BUT000-KNA1.NAMORG1',
+      'BUT000-KNA1.NAMORG3',
+      'BUT000-KNA1.SORTL',
+      'BUT000-KNA1.MCOD2'
+    ].includes(r.fieldCode));
+  if (!targetFields.length) return 0;
+
+  const existingRows = await tx.run(
+    `SELECT "ID", "FIELD_ID", "VALUE"
+       FROM "MDG_REQUEST_FIELD_VALUE"
+      WHERE "REQUEST_ID" = ?
+        AND "LINE_NO" = 1
+        AND "FIELD_ID" IN (${targetFields.map(() => '?').join(',')})`,
+    [requestId, ...targetFields.map((r) => r.fieldId)]
+  );
+  const existingByFieldId = new Map((existingRows || []).map((r) => [String(r.FIELD_ID), r]));
+
+  const payloadBySapField = new Map();
+  for (const [key, value] of Object.entries(payload || {})) {
+    if (!isNonEmpty(value)) continue;
+    payloadBySapField.set(normalizeSapField(key), String(value).trim());
+  }
+
+  let changed = 0;
+  const ts = now();
+  for (const field of targetFields) {
+    const current = existingByFieldId.get(field.fieldId);
+    const currentValue = String(current?.VALUE || '').trim();
+    const nextValue = field.fieldCode === 'BUT000-KNA1.KUNNR'
+      ? resolvedKunnr
+      : String(payloadBySapField.get(normalizeSapField(field.sapField)) || '').trim();
+    if (!nextValue) continue;
+    if (areValuesEqual(current?.VALUE ?? null, nextValue)) continue;
+
+    if (current?.ID) {
+      await tx.run(
+        `UPDATE "MDG_REQUEST_FIELD_VALUE"
+            SET "VALUE" = ?, "MODIFIEDAT" = ?, "MODIFIEDBY" = ?
+          WHERE "ID" = ?`,
+        [nextValue, ts, userId, current.ID]
+      );
+    } else {
+      await tx.run(
+        `INSERT INTO "MDG_REQUEST_FIELD_VALUE"
+         ("ID", "REQUEST_ID", "FIELD_ID", "LINE_NO", "VALUE", "MODIFIEDAT", "MODIFIEDBY")
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [uuid(), requestId, field.fieldId, 1, nextValue, ts, userId]
+      );
+    }
+
+    await insertRequestFieldChangeLog(tx, {
+      requestId,
+      fieldId: field.fieldId,
+      fieldCode: field.fieldCode || `FIELD_ID:${field.fieldId}`,
+      lineNo: 1,
+      oldValue: current?.VALUE ?? null,
+      newValue: nextValue,
+      changeType: current?.ID ? 'UPDATE' : 'CREATE',
+      changedBy: userId,
+      changedRole: ROLE_CODES.REQUESTER,
+      source: 'PREFILL_CUSTOMER'
+    });
+    changed += 1;
+  }
+
+  await syncRequestSubjectFromRequestValue(tx, {
+    requestId,
+    fieldId: targetFields.find((r) => r.fieldCode === 'BUT000-KNA1.KUNNR')?.fieldId,
+    rawValue: resolvedKunnr,
+    userId
+  });
+
+  return changed;
+}
+
 async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
   const reqRows = await tx.run(
     `SELECT r."PROCESS_ID" AS "PROCESS_ID", r."COUNTRY_CODE" AS "COUNTRY_CODE", p."PROCESS_CODE" AS "PROCESS_CODE"
@@ -418,7 +563,7 @@ async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
     [requesterRoleId, requesterRoleId, request.COUNTRY_CODE, request.PROCESS_ID]
   );
   const readonlyDest = (destRows || [])
-    .filter((r) => Number(r.EFFECTIVE_CONTROL) === FIELD_CONTROL.READ_ONLY)
+    .filter((r) => [FIELD_CONTROL.READ_ONLY, FIELD_CONTROL.HIDDEN].includes(Number(r.EFFECTIVE_CONTROL)))
     .map((r) => ({
       fieldId: r.FIELD_ID,
       fieldCode: String(r.FIELD_CODE || '').trim(),
@@ -548,7 +693,7 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
       WHERE pb."PROCESS_ID" = ?
         AND fcb."DEFAULT_BASE" IS NOT NULL
         AND LENGTH(TRIM(fcb."DEFAULT_BASE")) > 0
-        AND COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) = ${FIELD_CONTROL.READ_ONLY}`,
+        AND COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) IN (${FIELD_CONTROL.READ_ONLY}, ${FIELD_CONTROL.HIDDEN})`,
     [processRoleId, countryCode, processId]
   );
 
@@ -1003,6 +1148,13 @@ async function afterUpsertRequestValue(_, req) {
       requestId: audit.requestId,
       userId
     });
+    if (triggerFieldCode === 'BUT000-KNA1.KUNNR') {
+      await syncDestMercCreationFromCustomerRef(tx, {
+        requestId: audit.requestId,
+        rawValue: req.data?.VALUE,
+        userId
+      });
+    }
   }
 }
 
