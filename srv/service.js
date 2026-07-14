@@ -73,6 +73,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_DriverImp', vh.readDriverImp);
   this.on('READ', 'VH_DriverNif', vh.readDriverNif);
   this.on('READ', 'VH_DriverAdi', vh.readDriverAdi);
+  this.on('READ', 'VH_DriverRelationshipBP', vh.readDriverRelationshipBp);
   this.on('READ', 'VH_BillToGen', vh.readBillToGen);
   this.on('READ', 'VH_BillToCom', vh.readBillToCom);
   this.on('READ', 'VH_BillToImp', vh.readBillToImp);

@@ -210,6 +210,13 @@ service MDGService @(path:'/mdg') {
     BusinessPartnerName             : String(120);
   }
 
+  @cds.persistence.skip @readonly entity VH_DriverRelationshipBP {
+    key RelatedBusinessPartner      : String(10);
+    SourceBusinessPartner           : String(10);
+    BusinessPartnerRole             : String(6);
+    RelationshipCategory            : String(6);
+  }
+
   @cds.persistence.skip @readonly entity VH_CustomerPaymentCondition {
     key PaymentCondition            : String(4);
     PaymentCondition_Text           : String(120);
@@ -1020,6 +1027,13 @@ annotate MDGService.VH_MaterialKtgrm with {
 annotate MDGService.VH_MaterialUoM with {
   UnitOfMeasure @Common.Label: 'Unidad de medida';
   UnitOfMeasure_Text @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DriverRelationshipBP with {
+  RelatedBusinessPartner @Common.Label: 'Conductor';
+  SourceBusinessPartner @Common.Label: 'Dueño';
+  BusinessPartnerRole @Common.Label: 'Rol BP';
+  RelationshipCategory @Common.Label: 'Relación';
 };
 
 annotate MDGService.VH_DriverGen with {

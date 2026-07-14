@@ -942,7 +942,8 @@ function _buildRemoteQuery(q, catalog, route, vhName = '') {
 
 const STATIC_VH_FILTERS = {
   VH_OwnerBP: [`BusinessPartnerRole eq 'CRM010'`],
-  VH_TransportistaBP: [`BusinessPartnerRole eq 'CRM010'`]
+  VH_TransportistaBP: [`BusinessPartnerRole eq 'CRM010'`],
+  VH_DriverRelationshipBP: [`BusinessPartnerRole eq 'TM0001'`, `RelationshipCategory eq 'CRMS01'`]
 };
 
 async function _readRequestSubjectId(tx, requestId) {
@@ -1256,6 +1257,7 @@ module.exports = {
   readDriverImp: expose('VH_DriverImp'),
   readDriverNif: expose('VH_DriverNif'),
   readDriverAdi: expose('VH_DriverAdi'),
+  readDriverRelationshipBp: expose('VH_DriverRelationshipBP'),
   readBillToGen: expose('VH_BillToGen'),
   readBillToCom: expose('VH_BillToCom'),
   readBillToImp: expose('VH_BillToImp'),
