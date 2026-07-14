@@ -1,4 +1,5 @@
 const cds = require('@sap/cds');
+const { executeHttpRequest } = require('@sap-cloud-sdk/http-client');
 const { s4Get } = require('./_lib/s4.client');
 const {
   FIELD_CONTROL,
@@ -22,7 +23,6 @@ const {
   areValuesEqual,
   insertRequestFieldChangeLog
 } = require('./_lib/request-change-log.util');
-const { fetchCustomerPayloadBySubject } = require('./prefill.handler');
 
 function getEntityId(req) {
   return req.data?.ID || req.params?.[0]?.ID;
@@ -383,10 +383,17 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
 
   let payload = {};
   try {
-    payload = await fetchCustomerPayloadBySubject({
-      subjectId: refValue,
-      subjectFieldCode: 'KNA1.KUNNR'
-    });
+    const filter = encodeURIComponent(`Kunnr eq '${escapeODataString(refValue)}'`);
+    const response = await executeHttpRequest(
+      { destinationName: 'S4H-TECH' },
+      {
+        method: 'GET',
+        url: `/sap/opu/odata/sap/ZCDS_DESTMERC_GEN_CDS/zcds_destmerc_gen?$filter=${filter}&$select=Kunnr%2CSortl&$top=1`,
+        timeout: 90000,
+        headers: { Accept: 'application/json' }
+      }
+    );
+    payload = response?.data?.d?.results?.[0] || response?.data?.value?.[0] || {};
   } catch (err) {
     console.warn(`[DM_CREATION_PREFILL] customer lookup failed for ref=${refValue}: ${err?.message || err}`);
     return 0;
