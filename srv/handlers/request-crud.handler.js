@@ -1138,6 +1138,13 @@ async function afterUpsertRequestValue(_, req) {
       userId
     });
   }
+  if (triggerFieldCode.startsWith('KNA1.')) {
+    await syncDestMercEmbeddedFromKna1(tx, {
+      requestId: audit.requestId,
+      userId,
+      roleCode: audit.roleCode || ROLE_CODES.REQUESTER
+    });
+  }
   if (triggerFieldCode === 'BUT000-KNA1.KUNNR') {
     await syncDestMercCreationFromCustomerRef(tx, {
       requestId: audit.requestId,
