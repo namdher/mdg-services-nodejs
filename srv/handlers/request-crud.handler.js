@@ -213,7 +213,7 @@ async function getRequesterDefaultByFieldIds(tx, { processId, countryCode, field
   return out;
 }
 
-async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
+async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId, roleCode = ROLE_CODES.REQUESTER }) {
   const reqRows = await tx.run(
     `SELECT r."PROCESS_ID" AS "PROCESS_ID", r."COUNTRY_CODE" AS "COUNTRY_CODE", p."PROCESS_CODE" AS "PROCESS_CODE"
        FROM "MDG_REQUEST_HEADER" r
@@ -226,13 +226,12 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
   const requesterRoleId = await getRequesterRoleId(tx, request.PROCESS_ID);
   if (!requesterRoleId) return 0;
 
-  // Mirror only read-only destination fields without fixed default in CUST_DESTMERC_GEN.
+  // CAP owns the replication so the UI never submits duplicate destination writes.
   const destRows = await tx.run(
     `SELECT DISTINCT
         fc."ID" AS "FIELD_ID",
         fc."FIELD_CODE" AS "FIELD_CODE",
         fc."SAP_FIELD" AS "SAP_FIELD",
-        COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) AS "EFFECTIVE_CONTROL",
         COALESCE(NULLIF(TRIM(fcc."DEFAULT_OVERRIDE"), ''), NULLIF(TRIM(fcb."DEFAULT_BASE"), '')) AS "EFFECTIVE_DEFAULT"
        FROM "MDG_PROCESS_BLOCK" pb
        JOIN "MDG_OBJECT_BLOCK" ob
@@ -260,11 +259,9 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
       fieldId: String(r.FIELD_ID || '').trim(),
       fieldCode: String(r.FIELD_CODE || '').trim(),
       sapField: String(r.SAP_FIELD || '').trim(),
-      control: Number(r.EFFECTIVE_CONTROL),
       defaultValue: String(r.EFFECTIVE_DEFAULT || '').trim()
     }))
     .filter((r) => r.fieldId && r.fieldCode && r.sapField)
-    .filter((r) => [FIELD_CONTROL.READ_ONLY, FIELD_CONTROL.HIDDEN].includes(r.control))
     .filter((r) => !r.defaultValue);
   if (!destFields.length) return 0;
 
@@ -359,7 +356,7 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId }) {
       newValue: nextValue,
       changeType: current?.ID ? 'UPDATE' : 'CREATE',
       changedBy: userId,
-      changedRole: ROLE_CODES.REQUESTER,
+      changedRole: roleCode,
       source: 'PREFILL_CUSTOMER'
     });
     changed += 1;
@@ -1135,27 +1132,45 @@ async function afterUpsertRequestValue(_, req) {
   const shouldSyncDestFact = triggerFieldCode.startsWith('KNA1.')
     || triggerFieldCode.startsWith('BUT000-KNA1.')
     || triggerFieldCode === 'MDG_CTRL.CREATE_DESTFACT';
-  const shouldSyncDestMerc = triggerFieldCode.startsWith('KNA1.')
-    || triggerFieldCode.startsWith('BUT000-KNA1.');
   if (shouldSyncDestFact) {
     await syncDestFactReadonlyFromKna1(tx, {
       requestId: audit.requestId,
       userId
     });
   }
-  if (shouldSyncDestMerc) {
-    await syncDestMercEmbeddedFromKna1(tx, {
+  if (triggerFieldCode === 'BUT000-KNA1.KUNNR') {
+    await syncDestMercCreationFromCustomerRef(tx, {
       requestId: audit.requestId,
+      rawValue: req.data?.VALUE,
       userId
     });
-    if (triggerFieldCode === 'BUT000-KNA1.KUNNR') {
-      await syncDestMercCreationFromCustomerRef(tx, {
-        requestId: audit.requestId,
-        rawValue: req.data?.VALUE,
-        userId
-      });
-    }
   }
+}
+
+async function onSyncCustomerDestinationAddress(req) {
+  const tx = cds.tx(req);
+  const requestId = String(req.data?.ID || '').trim();
+  const userId = currentUserId(req);
+
+  if (!requestId) req.reject(400, 'Missing Request ID');
+
+  const request = await getRequestById(tx, requestId);
+  if (!request) req.reject(404, `Request not found: ${requestId}`);
+  if (request.ISDELETED) req.reject(409, 'Request is deleted');
+
+  const status = normalizeStatus(request.STATUS);
+  const assignments = await getUserRoleAssignments(tx, req, {
+    processId: request.PROCESS_ID,
+    countryCode: request.COUNTRY_CODE
+  });
+  const editor = resolveEditorRoleFromStatus(assignments, status);
+  if (!editor) req.reject(403, `User cannot edit RequestValues for status ${status}`);
+
+  return syncDestMercEmbeddedFromKna1(tx, {
+    requestId,
+    userId,
+    roleCode: editor.ROLE_CODE
+  });
 }
 
 async function onDeleteRequestValue(req) {
@@ -1217,6 +1232,7 @@ function register(service) {
   service.after('CREATE', 'RequestValues', afterUpsertRequestValue);
   service.after('UPDATE', 'RequestValues', afterUpsertRequestValue);
   service.on('DELETE', 'RequestValues', onDeleteRequestValue);
+  service.on('syncCustomerDestinationAddress', onSyncCustomerDestinationAddress);
 }
 
 module.exports = { register };

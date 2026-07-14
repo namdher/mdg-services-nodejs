@@ -570,6 +570,7 @@ service MDGService @(path:'/mdg') {
 
   action approveRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
   action rejectRequest(ID : String(36), COMMENT : String(1000)) returns LargeString;
+  action syncCustomerDestinationAddress(ID : String(36)) returns Integer;
   action prefillCustomer(
     requestId   : UUID,
     subjectId   : String(60),
