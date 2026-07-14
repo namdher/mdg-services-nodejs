@@ -245,6 +245,47 @@ async function _readRequestValueByFieldCode(tx, requestId, fieldCode) {
   return _isEmptyValue(value) ? null : String(value).trim();
 }
 
+async function _readRequestDefaultByFieldCode(tx, requestId, fieldCode) {
+  if (!requestId || !fieldCode) return null;
+
+  const rows = await tx.run(
+    `SELECT DISTINCT
+        COALESCE(
+          NULLIF(TRIM(fcc."DEFAULT_OVERRIDE"), ''),
+          NULLIF(TRIM(fcb."DEFAULT_BASE"), '')
+        ) AS "DEFAULT_VALUE"
+       FROM "MDG_REQUEST_HEADER" rh
+       JOIN "MDG_PROCESS_BLOCK" pb
+         ON pb."PROCESS_ID" = rh."PROCESS_ID"
+       JOIN "MDG_BLOCK_FIELD" bf
+         ON bf."BLOCK_ID" = pb."BLOCK_ID"
+       JOIN "MDG_FIELD_CATALOG" fc
+         ON fc."ID" = bf."FIELD_ID"
+       JOIN "MDG_PROCESS_ROLE" pr
+         ON pr."PROCESS_ID" = rh."PROCESS_ID"
+        AND pr."IS_ENABLED" = true
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = pr."ID"
+        AND fcb."FIELD_ID" = fc."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = pr."ID"
+        AND fcc."FIELD_ID" = fc."ID"
+        AND fcc."COUNTRY_CODE" = rh."COUNTRY_CODE"
+      WHERE rh."ID" = ?
+        AND fc."FIELD_CODE" = ?`,
+    [requestId, fieldCode]
+  );
+
+  const defaults = Array.from(new Set(
+    (rows || [])
+      .map((row) => String(row.DEFAULT_VALUE || '').trim())
+      .filter(Boolean)
+  ));
+
+  // Only infer a default when every active process role agrees on its value.
+  return defaults.length === 1 ? defaults[0] : null;
+}
+
 function _normalizeCatalogRow(row) {
   if (!row) return null;
   return {
@@ -572,6 +613,9 @@ async function _resolveDependencyValue(tx, dep, contextMap, requestId) {
 
   const fromRequest = await _readRequestValueByFieldCode(tx, requestId, depFieldCode);
   if (fromRequest) return { value: fromRequest, source: 'persisted' };
+
+  const fromDefault = await _readRequestDefaultByFieldCode(tx, requestId, depFieldCode);
+  if (fromDefault) return { value: fromDefault, source: 'default' };
 
   return { value: null, source: null };
 }
