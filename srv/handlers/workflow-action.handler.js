@@ -415,18 +415,6 @@ function _classifyCustomerCreationTarget(target) {
   const id = String(target?.id || '');
   const token = `${targetCode} ${entitySet}`;
 
-  const isCustomerMain = entitySet === 'CLIENTESGENERALSET'
-    || (token.includes('CLIENT') && (token.includes('GENERAL') || token.includes('CREATION')));
-  if (isCustomerMain) {
-    return { stepType: 'CUSTOMER_MAIN', order: 10, label: 'Cliente' };
-  }
-
-  const isDestMercMain = entitySet === 'DESTMERCADERIAGENERALSET'
-    || ((token.includes('DESTMERC') || token.includes('DESTMERCADERIA')) && (token.includes('GENERAL') || token.includes('CREATION')));
-  if (isDestMercMain) {
-    return { stepType: 'DESTMERC_MAIN', order: 20, label: 'Destinatario mercadería' };
-  }
-
   const isCustomerCompany = entitySet === 'CLIENTESEMPRESARIALSET'
     || token.includes('COMPANYCODE')
     || token.includes('EMPRESARIAL');
@@ -444,6 +432,23 @@ function _classifyCustomerCreationTarget(target) {
     || ((token.includes('DESTMERC') || token.includes('DESTMERCADERIA')) && (token.includes('COMERCIAL') || token.includes('ORG') || token.includes('SALES')));
   if (isDestMercSales) {
     return { stepType: 'DESTMERC_SALES', order: 50, label: 'Destinatario mercadería organización de ventas' };
+  }
+
+  const isCustomerMain = entitySet === 'CLIENTESGENERALSET'
+    || targetCode === 'SAP_CUSTOMER_CREATION'
+    || targetCode === 'SAP_CUSTOMER_CREATION_GENERAL'
+    || targetCode === 'SAP_CUSTOMER_CREATION_CUSTOMER_GENERAL'
+    || (targetCode.endsWith('_GENERAL') && token.includes('CLIENT') && !token.includes('DESTMERC'));
+  if (isCustomerMain) {
+    return { stepType: 'CUSTOMER_MAIN', order: 10, label: 'Cliente' };
+  }
+
+  const isDestMercMain = entitySet === 'DESTMERCADERIAGENERALSET'
+    || targetCode === 'SAP_CUSTOMER_CREATION_DESTMERC_GENERAL'
+    || targetCode === 'SAP_DESTMERC_CREATION'
+    || ((token.includes('DESTMERC') || token.includes('DESTMERCADERIA')) && token.includes('GENERAL'));
+  if (isDestMercMain) {
+    return { stepType: 'DESTMERC_MAIN', order: 20, label: 'Destinatario mercadería' };
   }
 
   const isSales = entitySet.includes('COMERCIAL') || token.includes('SALES') || token.includes('ORG');
