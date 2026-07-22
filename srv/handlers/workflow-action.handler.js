@@ -1679,7 +1679,7 @@ async function _postToS4AndPersistLegacy(tx, {
 
   try {
     const res = await executeHttpRequest(
-      jwt ? { destinationName, jwt } : { destinationName },
+      { destinationName },
       {
       method: 'POST',
       url,
