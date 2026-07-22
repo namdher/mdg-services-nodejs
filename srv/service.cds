@@ -295,6 +295,116 @@ service MDGService @(path:'/mdg') {
     SalesOrganization               : String(4);
   }
 
+  @cds.persistence.skip @readonly entity VH_DestMercRelevanciaAnalco {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercRelevanciaCerveza {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercRelevanciaCPCH {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercRelevanciaVSPT {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercPotencialAnalco {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercPotencialCerveza {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercPotencialCPCH {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercPotencialVSPT {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercClienteAdyacente {
+    key BusinessPartner             : String(10);
+    BusinessPartnerName             : String(81);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercFormatoPrecio {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercGestionEmbalaje {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercGestionEnvase {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercNorma4540 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercActivoSGA {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic11 {
+    key Ruta                        : String(6);
+    Descripcion                     : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic12 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic13 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic14 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic15 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic16 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic17 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
+  @cds.persistence.skip @readonly entity VH_DestMercCampoAdic18 {
+    key Codigo                      : String(10);
+    Descripcion                     : String(25);
+  }
+
   @cds.persistence.skip @readonly entity VH_DestMercBP {
     key BusinessPartner             : String(10);
     BusinessPartnerCategory         : String(2);
@@ -996,6 +1106,116 @@ annotate MDGService.VH_CustomerGroup10 with {
   CustomerGroup10 @Common.Label: 'Grupo de clientes 10';
   CustomerGroupName @Common.Label: 'Descripción';
   SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_DestMercRelevanciaAnalco with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercRelevanciaCerveza with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercRelevanciaCPCH with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercRelevanciaVSPT with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercPotencialAnalco with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercPotencialCerveza with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercPotencialCPCH with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercPotencialVSPT with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercClienteAdyacente with {
+  BusinessPartner @Common.Label: 'Cliente';
+  BusinessPartnerName @Common.Label: 'Nombre';
+};
+
+annotate MDGService.VH_DestMercFormatoPrecio with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercGestionEmbalaje with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercGestionEnvase with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercNorma4540 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercActivoSGA with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic11 with {
+  Ruta @Common.Label: 'Ruta';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic12 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic13 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic14 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic15 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic16 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic17 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_DestMercCampoAdic18 with {
+  Codigo @Common.Label: 'Código';
+  Descripcion @Common.Label: 'Descripción';
 };
 
 annotate MDGService.VH_DestMercBP with {
