@@ -1384,6 +1384,16 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
     }
   }
 
+  if (isMaterialComboFlow && Array.isArray(payload.N_Componentes)) {
+    const parentMaterial = String(payload.Matnr || '').trim();
+    if (parentMaterial) {
+      payload.N_Componentes = payload.N_Componentes.map((item) => ({
+        ...item,
+        Matnr: item?.Matnr || parentMaterial
+      }));
+    }
+  }
+
   return { payload, skippedFields };
 }
 
