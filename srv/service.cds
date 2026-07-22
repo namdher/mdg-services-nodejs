@@ -240,9 +240,58 @@ service MDGService @(path:'/mdg') {
     OrganizationDivision            : String(2);
   }
 
+  @cds.persistence.skip @readonly entity VH_CustomerGroup1 {
+    key CustomerGroup1              : String(3);
+    CustomerGroupName               : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup2 {
+    key CustomerGroup2              : String(3);
+    CustomerGroupName               : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup3 {
+    key CustomerGroup3              : String(3);
+    CustomerGroupName               : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup4 {
+    key CustomerGroup4              : String(3);
+    CustomerGroupName               : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup5 {
+    key CustomerGroup5              : String(3);
+    CustomerGroupName               : String(20);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup6 {
+    key CustomerGroup6              : String(3);
+    CustomerGroupName               : String(20);
+    SalesOrganization               : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup7 {
+    key CustomerGroup7              : String(3);
+    CustomerGroupName               : String(20);
+    SalesOrganization               : String(4);
+  }
+
   @cds.persistence.skip @readonly entity VH_CustomerGroup8 {
     key CustomerGroup8              : String(3);
     CustomerGroup8Name              : String(20);
+    SalesOrganization               : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup9 {
+    key CustomerGroup9              : String(3);
+    CustomerGroupName               : String(20);
+    SalesOrganization               : String(4);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerGroup10 {
+    key CustomerGroup10             : String(3);
+    CustomerGroupName               : String(20);
     SalesOrganization               : String(4);
   }
 
@@ -894,9 +943,58 @@ annotate MDGService.VH_SalesOffice with {
   OrganizationDivision @Common.Label: 'Sector';
 };
 
+annotate MDGService.VH_CustomerGroup1 with {
+  CustomerGroup1 @Common.Label: 'Grupo de clientes 1';
+  CustomerGroupName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerGroup2 with {
+  CustomerGroup2 @Common.Label: 'Grupo de clientes 2';
+  CustomerGroupName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerGroup3 with {
+  CustomerGroup3 @Common.Label: 'Grupo de clientes 3';
+  CustomerGroupName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerGroup4 with {
+  CustomerGroup4 @Common.Label: 'Grupo de clientes 4';
+  CustomerGroupName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerGroup5 with {
+  CustomerGroup5 @Common.Label: 'Grupo de clientes 5';
+  CustomerGroupName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerGroup6 with {
+  CustomerGroup6 @Common.Label: 'Grupo de clientes 6';
+  CustomerGroupName @Common.Label: 'Descripción';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_CustomerGroup7 with {
+  CustomerGroup7 @Common.Label: 'Grupo de clientes 7';
+  CustomerGroupName @Common.Label: 'Descripción';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
 annotate MDGService.VH_CustomerGroup8 with {
-  CustomerGroup8 @Common.Label: 'Nivel de imagen';
+  CustomerGroup8 @Common.Label: 'Grupo de clientes 8';
   CustomerGroup8Name @Common.Label: 'Descripción';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_CustomerGroup9 with {
+  CustomerGroup9 @Common.Label: 'Grupo de clientes 9';
+  CustomerGroupName @Common.Label: 'Descripción';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_CustomerGroup10 with {
+  CustomerGroup10 @Common.Label: 'Grupo de clientes 10';
+  CustomerGroupName @Common.Label: 'Descripción';
   SalesOrganization @Common.Label: 'Organización de ventas';
 };
 
