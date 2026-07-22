@@ -519,6 +519,43 @@ async function _resolveRequesterDefaultsByFieldId(tx, { processId, countryCode, 
   return out;
 }
 
+async function _resolveRequesterFieldControlsByFieldId(tx, { processId, countryCode, fieldIds }) {
+  const scopedFieldIds = Array.from(new Set((fieldIds || []).map((x) => String(x || '').trim()).filter(Boolean)));
+  if (!processId || !scopedFieldIds.length) return new Map();
+
+  const roleRows = await tx.run(
+    `SELECT "ID"
+       FROM "MDG_PROCESS_ROLE"
+      WHERE "PROCESS_ID" = ?
+        AND "ROLE_CODE" = 'REQUESTER'
+        AND "IS_ENABLED" = true
+      ORDER BY "ID"
+      LIMIT 1`,
+    [processId]
+  );
+  const requesterRoleId = roleRows?.[0]?.ID || null;
+  if (!requesterRoleId) return new Map();
+
+  const inClause = scopedFieldIds.map(() => '?').join(',');
+  const rows = await tx.run(
+    `SELECT
+        fc."ID" AS "FIELD_ID",
+        COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", 0) AS "FIELD_CONTROL"
+       FROM "MDG_FIELD_CATALOG" fc
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = ?
+        AND fcb."FIELD_ID" = fc."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = ?
+        AND fcc."FIELD_ID" = fc."ID"
+        AND fcc."COUNTRY_CODE" = ?
+      WHERE fc."ID" IN (${inClause})`,
+    [requesterRoleId, requesterRoleId, countryCode, ...scopedFieldIds]
+  );
+
+  return new Map((rows || []).map((r) => [String(r.FIELD_ID), Number(r.FIELD_CONTROL ?? 0)]));
+}
+
 async function _applyConfiguredDefaultsToPayload(tx, {
   processRoleId,
   countryCode,
@@ -585,6 +622,37 @@ async function _applyConfiguredDefaultsToPayload(tx, {
   }
 
   return { payload, backfilled };
+}
+
+async function _sanitizePayloadForSapTarget(tx, {
+  sapTargetId,
+  payload
+}) {
+  if (!sapTargetId || !payload || typeof payload !== 'object') return [];
+
+  const rows = await tx.run(
+    `SELECT "SAP_PROPERTY"
+       FROM "MDG_SAP_PAYLOAD_MAP"
+      WHERE "SAP_TARGET_ID" = ?
+        AND "SAP_PROPERTY" IS NOT NULL
+        AND LENGTH(TRIM("SAP_PROPERTY")) > 0`,
+    [sapTargetId]
+  );
+  const allowed = new Set((rows || []).map((r) => String(r.SAP_PROPERTY || '').trim()).filter(Boolean));
+  if (!allowed.size) return [];
+
+  const removed = [];
+  for (const key of Object.keys(payload)) {
+    if (allowed.has(key)) continue;
+    delete payload[key];
+    removed.push({
+      fieldId: null,
+      fieldCode: null,
+      sapField: key,
+      reason: 'not_in_target_payload_map'
+    });
+  }
+  return removed;
 }
 
 async function _readLatestRequestFieldValueByCode(tx, { requestId, fieldCode }) {
@@ -854,6 +922,11 @@ async function _applyCustomerToDestMercMirror(tx, {
     countryCode,
     fieldIds: targetRows.map((r) => r.FIELD_ID)
   });
+  const fieldControlByFieldId = await _resolveRequesterFieldControlsByFieldId(tx, {
+    processId,
+    countryCode,
+    fieldIds: targetRows.map((r) => r.FIELD_ID)
+  });
 
   const schema = getEntitySetSchema(entitySet);
   const props = schema?.properties || {};
@@ -869,8 +942,10 @@ async function _applyCustomerToDestMercMirror(tx, {
     const norm = _normalizePropertyName(sapField);
     const canonical = canonicalByNorm.get(norm);
     if (!canonical?.propName) continue;
-    if (_isNonEmpty(payload[canonical.propName])) continue; // explicit payload wins
-    if (_isNonEmpty(destExplicitBySapField.get(norm))) continue; // explicit destination value wins
+    const targetFieldControl = Number(fieldControlByFieldId.get(String(row.FIELD_ID)) ?? 0);
+    const isSystemControlledDestField = targetFieldControl === 3 || targetFieldControl === 7;
+    if (_isNonEmpty(payload[canonical.propName]) && !isSystemControlledDestField) continue; // editable explicit payload wins
+    if (_isNonEmpty(destExplicitBySapField.get(norm)) && !isSystemControlledDestField) continue; // editable destination value wins
 
     if (_isAddressSapField(sapField)) continue; // never mirror address automatically
 
@@ -1641,6 +1716,13 @@ async function _postToS4AndPersistLegacy(tx, {
   const jwt = _extractJwtFromReq(req);
   const claims = _decodeJwtPayloadUnsafe(jwt);
   const nowEpoch = Math.floor(Date.now() / 1000);
+  const sanitizedFields = await _sanitizePayloadForSapTarget(tx, {
+    sapTargetId,
+    payload
+  });
+  if (sanitizedFields.length) {
+    skippedFields.push(...sanitizedFields);
+  }
   console.info('[PP_DEBUG_REQUEST]', JSON.stringify({
     destinationName,
     servicePath,
