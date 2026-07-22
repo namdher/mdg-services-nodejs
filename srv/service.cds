@@ -525,6 +525,14 @@ service MDGService @(path:'/mdg') {
     Country                          : String(3);
   }
 
+  @cds.persistence.skip @readonly entity VH_MaterialPlant {
+    key Plant                         : String(4);
+    PlantName                         : String(120);
+    SalesOrganization                 : String(4);
+    DistributionChannel               : String(2);
+    Division                          : String(2);
+  }
+
   @cds.persistence.skip @readonly entity VH_MaterialKtgrm {
     key AcctAssignmentGroup           : String(4);
     Description                       : String(120);
@@ -1335,6 +1343,14 @@ annotate MDGService.VH_MaterialVtweg with {
   ProductDistributionChnl @Common.Label: 'Canal de distribución';
   ProductSalesOrg @Common.Label: 'Organización de ventas';
   Country @Common.Label: 'País';
+};
+
+annotate MDGService.VH_MaterialPlant with {
+  Plant @Common.Label: 'Centro';
+  PlantName @Common.Label: 'Nombre de centro';
+  SalesOrganization @Common.Label: 'Organización de ventas';
+  DistributionChannel @Common.Label: 'Canal de distribución';
+  Division @Common.Label: 'Sector';
 };
 
 annotate MDGService.VH_MaterialKtgrm with {

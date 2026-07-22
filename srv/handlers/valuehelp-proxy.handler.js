@@ -1221,6 +1221,7 @@ module.exports = {
   readMaterialProduct: expose('VH_MaterialProduct'),
   readMaterialSalesOrg: expose('VH_MaterialSalesOrg'),
   readMaterialVtweg: expose('VH_MaterialVtweg'),
+  readMaterialPlant: expose('VH_MaterialPlant'),
   readMaterialKtgrm: expose('VH_MaterialKtgrm'),
   readMaterialUoM: expose('VH_MaterialUoM'),
   readCustomerOrgV: expose('VH_CustomerOrgV'),
