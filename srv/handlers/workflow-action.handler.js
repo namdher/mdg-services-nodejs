@@ -1058,22 +1058,25 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
         v."LINE_NO"   AS "LINE_NO",
         v."VALUE"     AS "VALUE",
         c."FIELD_CODE" AS "FIELD_CODE",
-        c."SAP_FIELD" AS "SAP_FIELD",
+        COALESCE(NULLIF(TRIM(pm."SAP_PROPERTY"), ''), c."SAP_FIELD") AS "SAP_FIELD",
         c."DATA_TYPE" AS "DATA_TYPE"
        FROM "MDG_REQUEST_FIELD_VALUE" v
        JOIN "MDG_FIELD_CATALOG" c
          ON c."ID" = v."FIELD_ID"
+       LEFT JOIN "MDG_SAP_PAYLOAD_MAP" pm
+         ON pm."PROCESS_ID" = ?
+        AND pm."SAP_TARGET_ID" = ?
+        AND pm."FIELD_ID" = v."FIELD_ID"
       WHERE v."REQUEST_ID" = ?
         AND v."FIELD_ID" IN (${inClause})
-        AND c."SAP_FIELD" IS NOT NULL
-        AND LENGTH(TRIM(c."SAP_FIELD")) > 0
+        AND COALESCE(NULLIF(TRIM(pm."SAP_PROPERTY"), ''), NULLIF(TRIM(c."SAP_FIELD"), '')) IS NOT NULL
       ORDER BY
         v."FIELD_ID",
         CASE WHEN v."LINE_NO" = 1 THEN 0 ELSE 1 END,
         v."LINE_NO",
         v."MODIFIEDAT" DESC,
         v."ID" DESC`,
-    [requestId, ...allowedFieldIds]
+    [scopedProcessId, sapTargetId, requestId, ...allowedFieldIds]
   );
 
   if (fieldCodePrefixes.length) {
@@ -2329,6 +2332,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
             processRoleId: requesterRoleId,
             countryCode: request.COUNTRY_CODE,
             creationDateOverride: requestCreatedDate,
+            sapTargetId: step.id,
             excludeSapFields: entitySet === 'ClientesGeneralSet' ? ['Zzfechac'] : []
           }
         );

@@ -694,7 +694,7 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
     `SELECT DISTINCT
         fc."ID"          AS "FIELD_ID",
         fc."DATA_TYPE"   AS "DATA_TYPE",
-        fcb."DEFAULT_BASE" AS "DEFAULT_BASE"
+        COALESCE(fcc."DEFAULT_OVERRIDE", fcb."DEFAULT_BASE") AS "DEFAULT_VALUE"
        FROM "MDG_PROCESS_BLOCK" pb
        JOIN "MDG_BLOCK_FIELD" bf
          ON bf."BLOCK_ID" = pb."BLOCK_ID"
@@ -708,9 +708,8 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
         AND fcc."FIELD_ID" = fcb."FIELD_ID"
         AND fcc."COUNTRY_CODE" = ?
       WHERE pb."PROCESS_ID" = ?
-        AND fcb."DEFAULT_BASE" IS NOT NULL
-        AND LENGTH(TRIM(fcb."DEFAULT_BASE")) > 0
-        AND COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", ${FIELD_CONTROL.DEFAULT}) IN (${FIELD_CONTROL.READ_ONLY}, ${FIELD_CONTROL.HIDDEN})`,
+        AND COALESCE(fcc."DEFAULT_OVERRIDE", fcb."DEFAULT_BASE") IS NOT NULL
+        AND LENGTH(TRIM(COALESCE(fcc."DEFAULT_OVERRIDE", fcb."DEFAULT_BASE"))) > 0`,
     [processRoleId, countryCode, processId]
   );
 
@@ -735,7 +734,7 @@ async function applyDefaultsToRequest(tx, requestId, processId, countryCode, pro
   for (const row of scopedDefaults) {
     if (existingFieldIds.has(row.FIELD_ID)) continue;
 
-    const resolved = resolveDefaultValue(row.DEFAULT_BASE, row.DATA_TYPE);
+    const resolved = resolveDefaultValue(row.DEFAULT_VALUE, row.DATA_TYPE);
     if (resolved === null || resolved === '') continue;
 
     await tx.run(

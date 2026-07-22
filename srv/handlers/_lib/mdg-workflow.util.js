@@ -295,11 +295,12 @@ async function validateMandatoryFieldsOnSubmit(tx, { requestId, processId, proce
 
 async function insertActionLog(tx, { requestId, action, actorUser, actorRole, comment }) {
   try {
+    const safeComment = comment == null ? null : String(comment).slice(0, 1000);
     await tx.run(
       `INSERT INTO "MDG_REQUEST_ACTION_LOG"
        ("ID", "REQUEST_ID", "ACTION", "ACTOR_USER", "ACTOR_ROLE", "COMMENT", "CREATEDAT")
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [uuid(), requestId, action, actorUser, actorRole, comment || null, now()]
+      [uuid(), requestId, action, actorUser, actorRole, safeComment, now()]
     );
   } catch (err) {
     const msg = String(err?.message || '').toLowerCase();
