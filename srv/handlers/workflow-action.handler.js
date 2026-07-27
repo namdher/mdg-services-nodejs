@@ -747,6 +747,7 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
 
   const derived = [];
   const processCode = String(options.processCode || '').trim().toUpperCase();
+  const entitySet = String(options.entitySet || '').trim().toUpperCase();
   const mcod2 = _deriveMcod2ValueFromPayload(payload, { processCode });
   if (mcod2 && !_isNonEmpty(payload.Mcod2)) {
     payload.Mcod2 = mcod2;
@@ -769,35 +770,37 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
     }
   }
 
-  const maber = String(payload.Maber || '').trim();
-  const mahnaByMaber = {
-    '': 'ZVEN',
-    '01': 'ZCHE',
-    '02': 'ZJUD'
-  };
-  const mahnsByMaber = {
-    '': '1',
-    '01': '1',
-    '02': '2'
-  };
-  const derivedMahna = mahnaByMaber[maber];
-  if (derivedMahna && !_isNonEmpty(payload.Mahna)) {
-    payload.Mahna = derivedMahna;
-    derived.push({
-      fieldCode: 'KNB1.MAHNA',
-      sapField: 'MAHNA',
-      sourceFieldCode: 'DERIVED_FROM_MABER'
-    });
-  }
+  if (entitySet === 'CLIENTESSOCIEDADSET') {
+    const maber = String(payload.Maber || '').trim();
+    const mahnaByMaber = {
+      '': 'ZVEN',
+      '01': 'ZCHE',
+      '02': 'ZJUD'
+    };
+    const mahnsByMaber = {
+      '': '1',
+      '01': '1',
+      '02': '2'
+    };
+    const derivedMahna = mahnaByMaber[maber];
+    if (derivedMahna && !_isNonEmpty(payload.Mahna)) {
+      payload.Mahna = derivedMahna;
+      derived.push({
+        fieldCode: 'KNB1.MAHNA',
+        sapField: 'MAHNA',
+        sourceFieldCode: 'DERIVED_FROM_MABER'
+      });
+    }
 
-  const derivedMahns = mahnsByMaber[maber];
-  if (derivedMahns && !_isNonEmpty(payload.Mahns)) {
-    payload.Mahns = derivedMahns;
-    derived.push({
-      fieldCode: 'KNB1.MAHNS',
-      sapField: 'MAHNS',
-      sourceFieldCode: 'DERIVED_FROM_MABER'
-    });
+    const derivedMahns = mahnsByMaber[maber];
+    if (derivedMahns && !_isNonEmpty(payload.Mahns)) {
+      payload.Mahns = derivedMahns;
+      derived.push({
+        fieldCode: 'KNB1.MAHNS',
+        sapField: 'MAHNS',
+        sourceFieldCode: 'DERIVED_FROM_MABER'
+      });
+    }
   }
 
   return { payload, derived };
@@ -2469,7 +2472,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           mirrored = [...mirrored, ...(mirroredResult.mirrored || [])];
         }
 
-        const derivedResult = _applyDerivedBusinessTermsToPayload(payload, { processCode });
+        const derivedResult = _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet });
         mirrored = [...mirrored, ...(derivedResult.derived || [])];
 
         const stepSubjectId = (
@@ -2683,7 +2686,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           allowedFieldIds,
           payload
         });
-        _applyDerivedBusinessTermsToPayload(payload, { processCode });
+        _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet });
 
         if (step.stepType === 'CUSTOMER_SALES') {
           if (!customerPrincipalId) {
@@ -2983,7 +2986,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         allowedFieldIds,
         payload
       });
-      _applyDerivedBusinessTermsToPayload(payload, { processCode });
+      _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet: sapTarget.entitySet });
 
       approveResult = await _postToS4AndPersist(tx, {
         req,
