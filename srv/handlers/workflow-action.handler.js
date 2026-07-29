@@ -35,7 +35,9 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No SAP target configured for process {processCode} and entity set {entitySet}',
     invalidDestfactFlags: 'Invalid controls: EXTEND_DESTFACT_SALES=true requires CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Mandatory fields missing for step {entitySet}: {fields}',
-    materialCodeAlreadyExists: 'Material code already exists in SAP: {materialCode}'
+    materialCodeAlreadyExists: 'Material code already exists in SAP: {materialCode}',
+    materialKtgrmReferenceMissing: 'Account assignment group could not be derived from channel 13 for material {product} and sales organization {vkorg}',
+    materialKtgrmReferenceFetchFailed: 'Could not read channel 13 reference for account assignment group: {message}'
   },
   es: {
     idRequired: 'ID es requerido',
@@ -47,7 +49,9 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No hay target SAP configurado para el proceso {processCode} y entity set {entitySet}',
     invalidDestfactFlags: 'Controles inválidos: EXTEND_DESTFACT_SALES=true requiere CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Faltan campos obligatorios para el paso {entitySet}: {fields}',
-    materialCodeAlreadyExists: 'El código de material ya existe en SAP: {materialCode}'
+    materialCodeAlreadyExists: 'El código de material ya existe en SAP: {materialCode}',
+    materialKtgrmReferenceMissing: 'No se pudo derivar el grupo de imputación desde canal 13 para material {product} y organización de ventas {vkorg}',
+    materialKtgrmReferenceFetchFailed: 'No se pudo leer la referencia de canal 13 para grupo de imputación: {message}'
   }
 });
 const STATUS_COMPLETED = STATUS.APPROVED;
@@ -560,6 +564,7 @@ async function _applyConfiguredDefaultsToPayload(tx, {
   processRoleId,
   countryCode,
   entitySet,
+  sapTargetId,
   allowedFieldIds,
   payload
 }) {
@@ -572,11 +577,14 @@ async function _applyConfiguredDefaultsToPayload(tx, {
     `SELECT
         fc."ID" AS "FIELD_ID",
         fc."FIELD_CODE" AS "FIELD_CODE",
-        fc."SAP_FIELD" AS "SAP_FIELD",
+        COALESCE(NULLIF(TRIM(pm."SAP_PROPERTY"), ''), fc."SAP_FIELD") AS "SAP_FIELD",
         fc."DATA_TYPE" AS "DATA_TYPE",
         COALESCE(fcc."FIELD_CONTROL_OVERRIDE", fcb."FIELD_CONTROL_BASE", 0) AS "FIELD_CONTROL",
         COALESCE(NULLIF(TRIM(fcc."DEFAULT_OVERRIDE"), ''), NULLIF(TRIM(fcb."DEFAULT_BASE"), '')) AS "DEFAULT_VALUE"
        FROM "MDG_FIELD_CATALOG" fc
+       LEFT JOIN "MDG_SAP_PAYLOAD_MAP" pm
+         ON pm."SAP_TARGET_ID" = ?
+        AND pm."FIELD_ID" = fc."ID"
        LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
          ON fcb."PROCESS_ROLE_ID" = ?
         AND fcb."FIELD_ID" = fc."ID"
@@ -585,7 +593,7 @@ async function _applyConfiguredDefaultsToPayload(tx, {
         AND fcc."FIELD_ID" = fc."ID"
         AND fcc."COUNTRY_CODE" = ?
       WHERE fc."ID" IN (${inClause})`,
-    [processRoleId, processRoleId, countryCode, ...scopedFieldIds]
+    [String(sapTargetId || '').trim(), processRoleId, processRoleId, countryCode, ...scopedFieldIds]
   );
 
   const schema = getEntitySetSchema(entitySet);
@@ -605,7 +613,15 @@ async function _applyConfiguredDefaultsToPayload(tx, {
     if (!canonical?.propName) continue;
     if (_isNonEmpty(payload[canonical.propName])) continue;
 
-    const conversion = convertValueForSap(defaultValue, {
+    let effectiveDefaultValue = defaultValue;
+    const isDateLikeDefault =
+      String(row.DATA_TYPE || '').toUpperCase().includes('DATE') ||
+      String(canonical.propType || '').toUpperCase().includes('DATETIME');
+    if (isDateLikeDefault && defaultValue.toLowerCase() === 'today') {
+      effectiveDefaultValue = new Date().toISOString().slice(0, 10);
+    }
+
+    const conversion = convertValueForSap(effectiveDefaultValue, {
       edmType: canonical.propType,
       fallbackDataType: row.DATA_TYPE
     });
@@ -697,6 +713,68 @@ async function _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode
   if (exists) {
     req.reject(409, _t(req, 'materialCodeAlreadyExists', { materialCode }));
   }
+}
+
+async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
+  requestId,
+  request,
+  processCode,
+  entitySet,
+  payload
+}) {
+  if (String(processCode || '').trim().toUpperCase() !== 'MATERIAL_EXTEND_SALESAREA') return { derived: [] };
+  if (String(entitySet || '').trim().toUpperCase() !== 'MATERIALESORGVENTASET') return { derived: [] };
+  if (!payload || typeof payload !== 'object') return { derived: [] };
+
+  const currentKtgrm = payload.Ktgrm || payload.KTGRM || payload.AcctAssignmentGroup;
+  if (_isNonEmpty(currentKtgrm)) return { derived: [] };
+
+  const product = String(
+    payload.Product ||
+    payload.Material ||
+    request?.SUBJECT_ID ||
+    await _readLatestRequestFieldValueByCode(tx, { requestId, fieldCode: 'MVKE.PRODUCT' }) ||
+    ''
+  ).trim();
+  const vkorg = String(
+    payload.Vkorg ||
+    payload.VKORG ||
+    await _readLatestRequestFieldValueByCode(tx, { requestId, fieldCode: 'MVKE.VKORG' }) ||
+    ''
+  ).trim();
+
+  if (!product || !vkorg) return { derived: [] };
+
+  let rows;
+  try {
+    rows = await s4Get({
+      servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+      entitySet: 'zcds_materiales_orgv',
+      query: {
+        '$top': 1,
+        '$filter': `Product eq '${_escapeODataLiteral(product)}' and Vkorg eq '${_escapeODataLiteral(vkorg)}' and Vtweg eq '13'`
+      }
+    });
+  } catch (err) {
+    req.reject(502, _t(req, 'materialKtgrmReferenceFetchFailed', {
+      message: err?.message || String(err)
+    }));
+  }
+
+  const source = (rows || [])[0] || null;
+  const ktgrm = String(source?.Ktgrm || source?.KTGRM || source?.AcctAssignmentGroup || '').trim();
+  if (!ktgrm) {
+    req.reject(422, _t(req, 'materialKtgrmReferenceMissing', { product, vkorg }));
+  }
+
+  _setPayloadPropertyFromSchema(entitySet, payload, ['Ktgrm', 'KTGRM', 'AcctAssignmentGroup'], ktgrm, 'Ktgrm');
+  return {
+    derived: [{
+      fieldCode: 'MVKE.KTGRM',
+      sapField: 'Ktgrm',
+      sourceFieldCode: 'ZCDS_MATERIALES_ORGV_CDS.zcds_materiales_orgv[Vtweg=13]'
+    }]
+  };
 }
 
 function _normalizeSearchTermValue(value, maxLength = 20) {
@@ -2436,6 +2514,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           processRoleId: requesterRoleId,
           countryCode: request.COUNTRY_CODE,
           entitySet,
+          sapTargetId: step.id,
           allowedFieldIds,
           payload
         });
@@ -2683,6 +2762,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           processRoleId: requesterRoleId,
           countryCode: request.COUNTRY_CODE,
           entitySet,
+          sapTargetId: step.id,
           allowedFieldIds,
           payload
         });
@@ -2773,10 +2853,17 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     } else if (processCode === 'TRANSPORT_DRIVER_CREATION') {
       const requesterRoleId = await _resolveRequesterRoleId(tx, processId);
       const activeTargets = (sapTargets || [])
-        .filter((t) => ['CONDUCTORESGENERALSET', 'CONDUCTORESCOMERCIALSET'].includes(String(t?.entitySet || '').toUpperCase()));
+        .filter((t) => [
+          'CONDUCTORESGENERALSET',
+          'CONDUCTORESROLSET',
+          'CONDUCTORESADICIONALESSET',
+          'CONDUCTORESCOMERCIALSET'
+        ].includes(String(t?.entitySet || '').toUpperCase()));
       const priority = {
         CONDUCTORESGENERALSET: 10,
-        CONDUCTORESCOMERCIALSET: 20
+        CONDUCTORESROLSET: 20,
+        CONDUCTORESADICIONALESSET: 30,
+        CONDUCTORESCOMERCIALSET: 40
       };
       const orderedTargets = activeTargets.sort((a, b) => {
         const pa = priority[String(a.entitySet || '').toUpperCase()] ?? 999;
@@ -2843,9 +2930,23 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           processId,
           {
             processRoleId: requesterRoleId,
-            countryCode: request.COUNTRY_CODE
+            countryCode: request.COUNTRY_CODE,
+            sapTargetId: target.id
           }
         );
+        const targetFieldMeta = await _loadSapTargetFieldMeta(tx, {
+          processId,
+          sapTargetId: target.id
+        });
+        const allowedFieldIds = targetFieldMeta.map((r) => String(r.FIELD_ID || '').trim()).filter(Boolean);
+        await _applyConfiguredDefaultsToPayload(tx, {
+          processRoleId: requesterRoleId,
+          countryCode: request.COUNTRY_CODE,
+          entitySet: target.entitySet,
+          sapTargetId: target.id,
+          allowedFieldIds,
+          payload
+        });
         if (!isGeneralStep && conductorId) {
           _setCustomerIdInPayloadFromSchema(target.entitySet, payload, conductorId);
         }
@@ -2983,10 +3084,18 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         processRoleId: requesterRoleId,
         countryCode: request.COUNTRY_CODE,
         entitySet: sapTarget.entitySet,
+        sapTargetId: sapTarget.id,
         allowedFieldIds,
         payload
       });
       _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet: sapTarget.entitySet });
+      await _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
+        requestId,
+        request,
+        processCode,
+        entitySet: sapTarget.entitySet,
+        payload
+      });
 
       approveResult = await _postToS4AndPersist(tx, {
         req,
