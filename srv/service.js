@@ -5,9 +5,12 @@ let _vhMappingsValidated = false;
 module.exports = cds.service.impl(async function () {
 
   const vh = require('./handlers/valuehelp-proxy.handler');
-  if (!_vhMappingsValidated) {
+  const skipVhStartupValidation = String(globalThis.process?.env?.MDG_SKIP_VH_STARTUP_VALIDATION || 'false').toLowerCase() === 'true';
+  if (!_vhMappingsValidated && !skipVhStartupValidation) {
     _vhMappingsValidated = true;
     await vh.validateVhMappingsOnStartup();
+  } else if (skipVhStartupValidation) {
+    _vhMappingsValidated = true;
   }
   const auth = require('./handlers/auth.handler');
   const process = require('./handlers/process.handler');
