@@ -909,6 +909,13 @@ function _deriveBusort2ValueFromPayload(payload) {
   return '';
 }
 
+function _normalizeDunningAreaKey(value) {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (!raw) return '';
+  if (/^\d+$/.test(raw) && raw.length < 2) return raw.padStart(2, '0');
+  return raw;
+}
+
 function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
   if (!payload || typeof payload !== 'object') return { payload, derived: [] };
 
@@ -938,7 +945,7 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
   }
 
   if (entitySet === 'CLIENTESSOCIEDADSET' || entitySet === 'CLIENTESEMPRESARIALSET') {
-    const maber = String(payload.Maber || '').trim();
+    const maber = _normalizeDunningAreaKey(payload.Maber);
     const mahnaByMaber = {
       '': 'ZVEN',
       '01': 'ZCHE',
@@ -950,7 +957,7 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
       '02': '2'
     };
     const derivedMahna = mahnaByMaber[maber];
-    if (derivedMahna && !_isNonEmpty(payload.Mahna)) {
+    if (derivedMahna && String(payload.Mahna || '').trim().toUpperCase() !== derivedMahna) {
       payload.Mahna = derivedMahna;
       derived.push({
         fieldCode: 'KNB1.MAHNA',
@@ -960,7 +967,7 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
     }
 
     const derivedMahns = mahnsByMaber[maber];
-    if (derivedMahns && !_isNonEmpty(payload.Mahns)) {
+    if (derivedMahns && String(payload.Mahns || '').trim() !== derivedMahns) {
       payload.Mahns = derivedMahns;
       derived.push({
         fieldCode: 'KNB1.MAHNS',
