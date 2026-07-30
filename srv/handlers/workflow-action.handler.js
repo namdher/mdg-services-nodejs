@@ -812,7 +812,61 @@ function _isTransientS4ValidationError(err) {
   return ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN'].includes(code) || [502, 503, 504].includes(status);
 }
 
-async function _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode }) {
+async function _rejectApprovalValidationAsRework(tx, req, {
+  requestId,
+  userId,
+  previousStatus,
+  message,
+  actionCode = 'APPROVE_VALIDATION_ERROR',
+  httpStatus = 409
+}) {
+  await tx.run(
+    `UPDATE "MDG_REQUEST_HEADER"
+        SET "STATUS" = ?,
+            "MODIFIEDAT" = ?,
+            "MODIFIEDBY" = ?
+      WHERE "ID" = ?`,
+    [STATUS.REWORK, new Date(), userId, requestId]
+  );
+
+  if (!areValuesEqual(previousStatus, STATUS.REWORK)) {
+    await insertRequestFieldChangeLog(tx, {
+      requestId,
+      fieldId: SYSTEM_FIELD_ID,
+      fieldCode: 'MDG_REQUEST_HEADER.STATUS',
+      oldValue: previousStatus,
+      newValue: STATUS.REWORK,
+      changeType: 'UPDATE',
+      changedBy: userId,
+      changedRole: ROLE_CODES.APPROVER,
+      source: 'WORKFLOW_APPROVE'
+    });
+  }
+
+  await insertActionLog(tx, {
+    requestId,
+    action: actionCode,
+    actorUser: userId,
+    actorRole: ROLE_CODES.APPROVER,
+    comment: message
+  });
+
+  await insertComment(tx, {
+    requestId,
+    authorUser: userId,
+    authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
+    message
+  });
+
+  req.reject(httpStatus, message);
+}
+
+async function _assertMaterialCodeDoesNotExist(tx, req, {
+  requestId,
+  processCode,
+  userId,
+  previousStatus
+}) {
   if (String(processCode || '').trim().toUpperCase() !== 'MATERIAL_CREATION_COMBOS') return;
 
   const materialCode = await _readLatestRequestFieldValueByCode(tx, {
@@ -844,7 +898,14 @@ async function _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode
 
   const exists = (rows || []).some((row) => String(row?.Material || '').trim() === materialCode);
   if (exists) {
-    req.reject(409, _t(req, 'materialCodeAlreadyExists', { materialCode }));
+    await _rejectApprovalValidationAsRework(tx, req, {
+      requestId,
+      userId,
+      previousStatus,
+      message: _t(req, 'materialCodeAlreadyExists', { materialCode }),
+      actionCode: 'APPROVE_VALIDATION_ERROR',
+      httpStatus: 409
+    });
   }
 }
 
@@ -2495,7 +2556,12 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     const processCode = process?.PROCESS_CODE || null;
     const processId = process?.PROCESS_ID || request.PROCESS_ID;
     const requestCreatedDate = await _readRequestCreatedDate(tx, requestId);
-    await _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode });
+    await _assertMaterialCodeDoesNotExist(tx, req, {
+      requestId,
+      processCode,
+      userId,
+      previousStatus: status
+    });
     const sapTargets = await _resolveSapTargetsForProcess(tx, { processId, operation: 'POST' });
     if (!sapTargets.length) {
       req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
