@@ -35,7 +35,6 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No SAP target configured for process {processCode} and entity set {entitySet}',
     invalidDestfactFlags: 'Invalid controls: EXTEND_DESTFACT_SALES=true requires CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Mandatory fields missing for step {entitySet}: {fields}',
-    materialCodeAlreadyExists: 'Material code already exists in SAP: {materialCode}',
     materialKtgrmReferenceMissing: 'Account assignment group could not be derived from channel 13 for material {product} and sales organization {vkorg}',
     materialKtgrmReferenceFetchFailed: 'Could not read channel 13 reference for account assignment group: {message}'
   },
@@ -49,7 +48,6 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No hay target SAP configurado para el proceso {processCode} y entity set {entitySet}',
     invalidDestfactFlags: 'Controles inválidos: EXTEND_DESTFACT_SALES=true requiere CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Faltan campos obligatorios para el paso {entitySet}: {fields}',
-    materialCodeAlreadyExists: 'El código de material ya existe en SAP: {materialCode}',
     materialKtgrmReferenceMissing: 'No se pudo derivar el grupo de imputación desde canal 13 para material {product} y organización de ventas {vkorg}',
     materialKtgrmReferenceFetchFailed: 'No se pudo leer la referencia de canal 13 para grupo de imputación: {message}'
   }
@@ -804,120 +802,6 @@ async function _resolveMaterialComboComponentUom(tx, {
     fieldCode: 'MARA.MEINS'
   });
   return configured || 'UN';
-}
-
-function _isTransientS4ValidationError(err) {
-  const code = String(err?.code || err?.reason?.code || err?.cause?.code || err?.rootCause?.code || '').toUpperCase();
-  const status = Number(err?.response?.status || err?.statusCode || err?.cause?.response?.status || err?.reason?.response?.status || 0);
-  return ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN'].includes(code) || [502, 503, 504].includes(status);
-}
-
-async function _rejectApprovalValidationAsRework(tx, req, {
-  requestId,
-  userId,
-  previousStatus,
-  message,
-  actionCode = 'APPROVE_VALIDATION_ERROR',
-  httpStatus = 409
-}) {
-  await tx.run(
-    `UPDATE "MDG_REQUEST_HEADER"
-        SET "STATUS" = ?,
-            "MODIFIEDAT" = ?,
-            "MODIFIEDBY" = ?
-      WHERE "ID" = ?`,
-    [STATUS.REWORK, new Date(), userId, requestId]
-  );
-
-  if (!areValuesEqual(previousStatus, STATUS.REWORK)) {
-    await insertRequestFieldChangeLog(tx, {
-      requestId,
-      fieldId: SYSTEM_FIELD_ID,
-      fieldCode: 'MDG_REQUEST_HEADER.STATUS',
-      oldValue: previousStatus,
-      newValue: STATUS.REWORK,
-      changeType: 'UPDATE',
-      changedBy: userId,
-      changedRole: ROLE_CODES.APPROVER,
-      source: 'WORKFLOW_APPROVE'
-    });
-  }
-
-  await insertActionLog(tx, {
-    requestId,
-    action: actionCode,
-    actorUser: userId,
-    actorRole: ROLE_CODES.APPROVER,
-    comment: message
-  });
-
-  await insertComment(tx, {
-    requestId,
-    authorUser: userId,
-    authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
-    message
-  });
-
-  return {
-    ok: false,
-    requestId,
-    processCode: 'MATERIAL_CREATION_COMBOS',
-    entitySet: null,
-    httpStatus,
-    finalStatus: STATUS.REWORK,
-    message,
-    skippedFields: []
-  };
-}
-
-async function _assertMaterialCodeDoesNotExist(tx, req, {
-  requestId,
-  processCode,
-  userId,
-  previousStatus
-}) {
-  if (String(processCode || '').trim().toUpperCase() !== 'MATERIAL_CREATION_COMBOS') return;
-
-  const materialCode = await _readLatestRequestFieldValueByCode(tx, {
-    requestId,
-    fieldCode: 'MARA.MATNR'
-  });
-  if (!materialCode) return;
-
-  let rows = [];
-  try {
-    rows = await s4Get({
-      servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-      entitySet: 'I_Material',
-      query: {
-        '$select': 'Material',
-        '$top': 1,
-        '$filter': `Material eq '${_escapeODataLiteral(materialCode)}'`
-      }
-    });
-  } catch (err) {
-    if (!_isTransientS4ValidationError(err)) throw err;
-    console.warn('[MATERIAL_EXISTS_CHECK_SKIPPED]', JSON.stringify({
-      requestId,
-      materialCode,
-      reason: String(err?.message || err)
-    }));
-    return;
-  }
-
-  const exists = (rows || []).some((row) => String(row?.Material || '').trim() === materialCode);
-  if (exists) {
-    return _rejectApprovalValidationAsRework(tx, req, {
-      requestId,
-      userId,
-      previousStatus,
-      message: _t(req, 'materialCodeAlreadyExists', { materialCode }),
-      actionCode: 'APPROVE_VALIDATION_ERROR',
-      httpStatus: 409
-    });
-  }
-
-  return null;
 }
 
 async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
@@ -2567,15 +2451,6 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     const processCode = process?.PROCESS_CODE || null;
     const processId = process?.PROCESS_ID || request.PROCESS_ID;
     const requestCreatedDate = await _readRequestCreatedDate(tx, requestId);
-    const materialValidationResult = await _assertMaterialCodeDoesNotExist(tx, req, {
-      requestId,
-      processCode,
-      userId,
-      previousStatus: status
-    });
-    if (materialValidationResult) {
-      approveResult = materialValidationResult;
-    } else {
     const sapTargets = await _resolveSapTargetsForProcess(tx, { processId, operation: 'POST' });
     if (!sapTargets.length) {
       req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
@@ -3321,7 +3196,6 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
       if (approveResult && approveResult.stepCount === undefined) {
         approveResult.stepCount = 1;
       }
-    }
     }
   } else {
     await tx.run(
