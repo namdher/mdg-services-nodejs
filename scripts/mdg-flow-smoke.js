@@ -61,6 +61,7 @@ function parseArgs(argv) {
     mode: 'mock',
     customer: null,
     destmerc: null,
+    materialCombo: null,
     injectSamples: true
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -69,10 +70,12 @@ function parseArgs(argv) {
     else if (a === '--real-post') out.mode = 'real';
     else if (a === '--customer') out.customer = argv[++i];
     else if (a === '--destmerc') out.destmerc = argv[++i];
+    else if (a === '--material-combo') out.materialCombo = argv[++i];
     else if (a === '--no-inject-samples') out.injectSamples = false;
     else if (a === '--help' || a === '-h') {
       console.log(`Usage:
   node scripts/mdg-flow-smoke.js --mock --customer <requestId> --destmerc <requestId>
+  node scripts/mdg-flow-smoke.js --mock --material-combo <requestId> --no-inject-samples
   MDG_FLOW_REAL_POST_CONFIRM=YES node scripts/mdg-flow-smoke.js --real-post --customer <inReviewId> --destmerc <inReviewId>
 
 Modes:
@@ -118,7 +121,7 @@ function makeReq({ requestId, token, userId, comment }) {
   return req;
 }
 
-function loadWorkflow({ mockHttp }) {
+function loadWorkflow({ mockHttp, mockS4Get }) {
   const filename = path.resolve('srv/handlers/workflow-action.handler.js');
   let code = fs.readFileSync(filename, 'utf8');
   code = code.replace(
@@ -135,6 +138,11 @@ function loadWorkflow({ mockHttp }) {
     if (mockHttp && request === '@sap-cloud-sdk/http-client') {
       return {
         executeHttpRequest: async (_destination, options) => mockHttp(options)
+      };
+    }
+    if (mockS4Get && request === './_lib/s4.client') {
+      return {
+        s4Get: async (params) => mockS4Get(params)
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -251,7 +259,8 @@ function makeMockHttp(callLog) {
     DestMercaderiaGeneralSet: '9000000020',
     ClientesOrgVentaSet: '9000000010',
     DestMercaderiaComercialSet: '9000000020',
-    DestMercaderiaImpuestosSet: '9000000020'
+    DestMercaderiaImpuestosSet: '9000000020',
+    MaterialesCombosSet: '871233'
   };
   return async function mockHttp(options) {
     const url = String(options?.url || '');
@@ -271,6 +280,7 @@ function makeMockHttp(callLog) {
         d: {
           Kunnr: ids[entitySet] || payload.Kunnr || payload.BusinessPartner || '9000000099',
           BusinessPartner: ids[entitySet] || payload.BusinessPartner || payload.Kunnr || '9000000099',
+          Matnr: ids[entitySet] || payload.Matnr || null,
           Vkorg: payload.Vkorg,
           Vtweg: payload.Vtweg,
           Spart: payload.Spart
@@ -280,14 +290,23 @@ function makeMockHttp(callLog) {
   };
 }
 
+function makeMockS4Get(readLog) {
+  return async function mockS4Get(params) {
+    readLog.push(params);
+    return [];
+  };
+}
+
 async function runOne({ db, requestId, mode, inject }) {
   const tx = db.tx();
   const originalCdsTx = cds.tx;
   cds.tx = () => tx;
 
   const callLog = [];
+  const readLog = [];
   const workflow = loadWorkflow({
-    mockHttp: mode === 'mock' ? makeMockHttp(callLog) : null
+    mockHttp: mode === 'mock' ? makeMockHttp(callLog) : null,
+    mockS4Get: mode === 'mock' ? makeMockS4Get(readLog) : null
   });
   try {
     const request = await readRequest(tx, requestId);
@@ -319,13 +338,31 @@ async function runOne({ db, requestId, mode, inject }) {
       approveResult: parsed,
       resultCount: Array.isArray(results) ? results.length : null,
       results,
+      s4Reads: readLog.map((r) => ({
+        servicePath: r.servicePath,
+        entitySet: r.entitySet,
+        query: r.query || {}
+      })),
       postCalls: callLog.map((c) => ({
         entitySet: c.entitySet,
+        matnr: c.payload.Matnr || null,
         kunnr: c.payload.Kunnr || null,
         kunnrPrinc: c.payload.KunnrPrinc || null,
         vkorg: c.payload.Vkorg || null,
         vtweg: c.payload.Vtweg || null,
         spart: c.payload.Spart || null,
+        taxes: c.entitySet === 'MaterialesCombosSet' ? {
+          Taxm1: c.payload.Taxm1,
+          Taxm2: c.payload.Taxm2,
+          Taxm3: c.payload.Taxm3,
+          Taxm4: c.payload.Taxm4,
+          Taxm5: c.payload.Taxm5,
+          Taxm6: c.payload.Taxm6,
+          Taxm7: c.payload.Taxm7
+        } : null,
+        components: c.entitySet === 'MaterialesCombosSet' && Array.isArray(c.payload.N_Componentes)
+          ? c.payload.N_Componentes
+          : null,
         additionalPresentCount: c.additionalPresent.length,
         additionalMissing: c.entitySet === 'DestMercaderiaComercialSet' ? c.additionalMissing : []
       }))
@@ -347,8 +384,8 @@ async function main() {
   if (args.mode === 'real' && process.env.MDG_FLOW_REAL_POST_CONFIRM !== 'YES') {
     throw new Error('Real POST blocked. Set MDG_FLOW_REAL_POST_CONFIRM=YES and use requests already in IN_REVIEW.');
   }
-  const ids = [args.customer, args.destmerc].filter(Boolean);
-  if (!ids.length) throw new Error('Provide --customer and/or --destmerc request IDs.');
+  const ids = [args.customer, args.destmerc, args.materialCombo].filter(Boolean);
+  if (!ids.length) throw new Error('Provide --customer, --destmerc and/or --material-combo request IDs.');
 
   const db = await cds.connect.to('db');
 

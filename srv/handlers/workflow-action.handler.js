@@ -218,6 +218,21 @@ function _extractSapObjectKey(body) {
 }
 
 function _extractSapErrorMessage(body) {
+  const detailMessages = [];
+  const rootMessage = body?.error?.message?.value || body?.error?.message || null;
+  const details = body?.error?.innererror?.errordetails;
+  if (Array.isArray(details)) {
+    for (const detail of details) {
+      const code = String(detail?.code || '').trim();
+      const message = String(detail?.message?.value || detail?.message || '').trim();
+      if (!message) continue;
+      if (code === '/IWBEP/CX_MGW_TECH_EXCEPTION') continue;
+      if (rootMessage && message === rootMessage && detailMessages.length > 0) continue;
+      if (!detailMessages.includes(message)) detailMessages.push(message);
+    }
+  }
+  if (detailMessages.length) return detailMessages.slice(0, 3).join(' | ').slice(0, 400);
+
   const message = body?.error?.message?.value || body?.error?.message || null;
   if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 200);
   const text = _responseBodyToText(body).trim();
@@ -640,6 +655,57 @@ async function _applyConfiguredDefaultsToPayload(tx, {
   return { payload, backfilled };
 }
 
+function _applyMaterialComboApprovalDefaults(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+  const changed = [];
+  const forceDefaults = {
+    Mbrsh: 'B',
+    Spras: 'ES',
+    Mtposmara: 'NORM',
+    Mtpos: 'NORM',
+    Taxm1: '0',
+    Taxm2: '0',
+    Taxm3: '0',
+    Taxm4: '0',
+    Taxm5: '0',
+    Taxm6: '0',
+    Taxm7: '0'
+  };
+  const fillDefaults = {
+    Aland: 'CL',
+    Matkl: 'COMBOS',
+    Meins: 'UN',
+    Mtart: 'ZCOM',
+    Spart: '06',
+    Vtweg: '20'
+  };
+
+  for (const [field, value] of Object.entries(forceDefaults)) {
+    if (String(payload[field] ?? '').trim() === value) continue;
+    payload[field] = value;
+    changed.push({ sapField: field, value, mode: 'force_material_combo_default' });
+  }
+  for (const [field, value] of Object.entries(fillDefaults)) {
+    if (_isNonEmpty(payload[field])) continue;
+    payload[field] = value;
+    changed.push({ sapField: field, value, mode: 'fill_material_combo_default' });
+  }
+
+  if (Array.isArray(payload.N_Componentes)) {
+    const fallbackUom = String(payload.Meins || 'UN').trim() || 'UN';
+    const parentMaterial = String(payload.Matnr || '').trim();
+    payload.N_Componentes = payload.N_Componentes.map((item) => {
+      const next = { ...(item || {}) };
+      if (parentMaterial && !_isNonEmpty(next.Matnr)) next.Matnr = parentMaterial;
+      if (!_isNonEmpty(next.Stlan)) next.Stlan = '5';
+      if (!_isNonEmpty(next.StpoMeins)) next.StpoMeins = fallbackUom;
+      return next;
+    });
+  }
+
+  return changed;
+}
+
 async function _sanitizePayloadForSapTarget(tx, {
   sapTargetId,
   payload
@@ -647,14 +713,22 @@ async function _sanitizePayloadForSapTarget(tx, {
   if (!sapTargetId || !payload || typeof payload !== 'object') return [];
 
   const rows = await tx.run(
-    `SELECT "SAP_PROPERTY"
+    `SELECT "SAP_PROPERTY", "SAP_PATH"
        FROM "MDG_SAP_PAYLOAD_MAP"
       WHERE "SAP_TARGET_ID" = ?
-        AND "SAP_PROPERTY" IS NOT NULL
-        AND LENGTH(TRIM("SAP_PROPERTY")) > 0`,
+        AND (
+          ("SAP_PROPERTY" IS NOT NULL AND LENGTH(TRIM("SAP_PROPERTY")) > 0)
+          OR ("SAP_PATH" IS NOT NULL AND LENGTH(TRIM("SAP_PATH")) > 0)
+        )`,
     [sapTargetId]
   );
-  const allowed = new Set((rows || []).map((r) => String(r.SAP_PROPERTY || '').trim()).filter(Boolean));
+  const allowed = new Set();
+  for (const row of rows || []) {
+    const sapProperty = String(row.SAP_PROPERTY || '').trim();
+    const sapPath = String(row.SAP_PATH || '').trim();
+    if (sapProperty) allowed.add(sapProperty);
+    if (sapPath) allowed.add(sapPath);
+  }
   if (!allowed.size) return [];
 
   const removed = [];
@@ -690,6 +764,54 @@ async function _readLatestRequestFieldValueByCode(tx, { requestId, fieldCode }) 
   return String(rows?.[0]?.VALUE || '').trim();
 }
 
+async function _readConfiguredDefaultByFieldCode(tx, {
+  processRoleId,
+  countryCode,
+  fieldCode
+}) {
+  if (!processRoleId || !fieldCode) return '';
+  const rows = await tx.run(
+    `SELECT COALESCE(NULLIF(TRIM(fcc."DEFAULT_OVERRIDE"), ''), NULLIF(TRIM(fcb."DEFAULT_BASE"), '')) AS "DEFAULT_VALUE"
+       FROM "MDG_FIELD_CATALOG" fc
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_BASE" fcb
+         ON fcb."PROCESS_ROLE_ID" = ?
+        AND fcb."FIELD_ID" = fc."ID"
+       LEFT JOIN "MDG_FIELD_CONTROL_RULE_COUNTRY" fcc
+         ON fcc."PROCESS_ROLE_ID" = ?
+        AND fcc."FIELD_ID" = fc."ID"
+        AND fcc."COUNTRY_CODE" = ?
+      WHERE fc."FIELD_CODE" = ?
+      LIMIT 1`,
+    [processRoleId, processRoleId, countryCode, fieldCode]
+  );
+  return String(rows?.[0]?.DEFAULT_VALUE || '').trim();
+}
+
+async function _resolveMaterialComboComponentUom(tx, {
+  requestId,
+  processRoleId,
+  countryCode
+}) {
+  const persisted = await _readLatestRequestFieldValueByCode(tx, {
+    requestId,
+    fieldCode: 'MARA.MEINS'
+  });
+  if (persisted) return persisted;
+
+  const configured = await _readConfiguredDefaultByFieldCode(tx, {
+    processRoleId,
+    countryCode,
+    fieldCode: 'MARA.MEINS'
+  });
+  return configured || 'UN';
+}
+
+function _isTransientS4ValidationError(err) {
+  const code = String(err?.code || err?.reason?.code || err?.cause?.code || err?.rootCause?.code || '').toUpperCase();
+  const status = Number(err?.response?.status || err?.statusCode || err?.cause?.response?.status || err?.reason?.response?.status || 0);
+  return ['ECONNRESET', 'ETIMEDOUT', 'ECONNABORTED', 'EAI_AGAIN'].includes(code) || [502, 503, 504].includes(status);
+}
+
 async function _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode }) {
   if (String(processCode || '').trim().toUpperCase() !== 'MATERIAL_CREATION_COMBOS') return;
 
@@ -699,15 +821,26 @@ async function _assertMaterialCodeDoesNotExist(tx, req, { requestId, processCode
   });
   if (!materialCode) return;
 
-  const rows = await s4Get({
-    servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
-    entitySet: 'I_Material',
-    query: {
-      '$select': 'Material',
-      '$top': 1,
-      '$filter': `Material eq '${_escapeODataLiteral(materialCode)}'`
-    }
-  });
+  let rows = [];
+  try {
+    rows = await s4Get({
+      servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
+      entitySet: 'I_Material',
+      query: {
+        '$select': 'Material',
+        '$top': 1,
+        '$filter': `Material eq '${_escapeODataLiteral(materialCode)}'`
+      }
+    });
+  } catch (err) {
+    if (!_isTransientS4ValidationError(err)) throw err;
+    console.warn('[MATERIAL_EXISTS_CHECK_SKIPPED]', JSON.stringify({
+      requestId,
+      materialCode,
+      reason: String(err?.message || err)
+    }));
+    return;
+  }
 
   const exists = (rows || []).some((row) => String(row?.Material || '').trim() === materialCode);
   if (exists) {
@@ -1284,6 +1417,11 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
       processId: scopedProcessId,
       sapTargetId
     });
+    const componentUomFallback = await _resolveMaterialComboComponentUom(tx, {
+      requestId,
+      processRoleId,
+      countryCode
+    });
     const expected = new Set(MATERIAL_COMBO_COMPONENT_FIELD_CODES);
     const actual = new Set(componentMapRows.map((r) => r.fieldCode));
     const missing = MATERIAL_COMBO_COMPONENT_FIELD_CODES.filter((c) => !actual.has(c));
@@ -1322,21 +1460,22 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
       const rowByCode = byLine.get(lineNo) || {};
       const rawStlan = String(rowByCode['STPO.STLAN'] ?? '').trim();
       const resolvedStlan = rawStlan || '5';
+      const rawMeins = String(rowByCode['STPO.MEINS'] ?? '').trim();
 
+      const lineRawByCode = {
+        ...rowByCode,
+        'STPO.STLAN': resolvedStlan,
+        'STPO.MEINS': rawMeins || componentUomFallback
+      };
       const missingFields = [];
       for (const fieldCode of MATERIAL_COMBO_REQUIRED_COMPONENT_CODES) {
-        const v = String(rowByCode[fieldCode] ?? '').trim();
+        const v = String(lineRawByCode[fieldCode] ?? '').trim();
         if (!v) missingFields.push(fieldCode);
       }
       if (missingFields.length) {
         lineErrors.push(`LINE_NO ${lineNo}: ${missingFields.join(', ')}`);
         continue;
       }
-
-      const lineRawByCode = {
-        ...rowByCode,
-        'STPO.STLAN': resolvedStlan
-      };
 
       const lineItem = {};
       for (const fieldCode of MATERIAL_COMBO_COMPONENT_FIELD_CODES) {
@@ -1367,12 +1506,6 @@ async function _buildSapPayload(tx, requestId, entitySet, processId, options = {
   for (const row of rows || []) {
     const fieldId = row.FIELD_ID;
     if (componentFieldIds.has(String(fieldId || '').trim())) {
-      skippedFields.push({
-        fieldId,
-        fieldCode: row.FIELD_CODE,
-        sapField: row.SAP_FIELD,
-        reason: 'component_multi_line_group'
-      });
       continue;
     }
     if (selectedFieldIds.has(fieldId)) continue;
@@ -2321,18 +2454,8 @@ async function _fetchRequestResults(tx, requestId) {
     };
   });
 
-  // Keep UI idempotent: expose latest record per step code while preserving storage history.
-  const latestByStep = new Map();
-  for (const item of normalized) {
-    const key = String(item.stepCode || '').trim().toUpperCase();
-    if (!key) continue;
-    const prev = latestByStep.get(key);
-    const prevTs = prev?.createdAt ? new Date(prev.createdAt).getTime() : -1;
-    const currTs = item?.createdAt ? new Date(item.createdAt).getTime() : -1;
-    if (!prev || currTs >= prevTs) latestByStep.set(key, item);
-  }
-  return Array.from(latestByStep.values())
-    .filter((item) => String(item.status || '').toUpperCase() !== 'SKIPPED')
+  // The management console needs the full SAP timeline: retries, errors and skipped steps.
+  return normalized
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
@@ -3089,6 +3212,12 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         payload
       });
       _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet: sapTarget.entitySet });
+      if (
+        String(processCode || '').trim().toUpperCase() === 'MATERIAL_CREATION_COMBOS' &&
+        String(sapTarget.entitySet || '').trim().toUpperCase() === 'MATERIALESCOMBOSSET'
+      ) {
+        _applyMaterialComboApprovalDefaults(payload);
+      }
       await _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
         requestId,
         request,
