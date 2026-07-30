@@ -937,7 +937,7 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
     }
   }
 
-  if (entitySet === 'CLIENTESSOCIEDADSET') {
+  if (entitySet === 'CLIENTESSOCIEDADSET' || entitySet === 'CLIENTESEMPRESARIALSET') {
     const maber = String(payload.Maber || '').trim();
     const mahnaByMaber = {
       '': 'ZVEN',
