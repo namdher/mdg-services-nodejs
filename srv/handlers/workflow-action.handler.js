@@ -858,7 +858,16 @@ async function _rejectApprovalValidationAsRework(tx, req, {
     message
   });
 
-  req.reject(httpStatus, message);
+  return {
+    ok: false,
+    requestId,
+    processCode: 'MATERIAL_CREATION_COMBOS',
+    entitySet: null,
+    httpStatus,
+    finalStatus: STATUS.REWORK,
+    message,
+    skippedFields: []
+  };
 }
 
 async function _assertMaterialCodeDoesNotExist(tx, req, {
@@ -898,7 +907,7 @@ async function _assertMaterialCodeDoesNotExist(tx, req, {
 
   const exists = (rows || []).some((row) => String(row?.Material || '').trim() === materialCode);
   if (exists) {
-    await _rejectApprovalValidationAsRework(tx, req, {
+    return _rejectApprovalValidationAsRework(tx, req, {
       requestId,
       userId,
       previousStatus,
@@ -907,6 +916,8 @@ async function _assertMaterialCodeDoesNotExist(tx, req, {
       httpStatus: 409
     });
   }
+
+  return null;
 }
 
 async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
@@ -2556,12 +2567,15 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
     const processCode = process?.PROCESS_CODE || null;
     const processId = process?.PROCESS_ID || request.PROCESS_ID;
     const requestCreatedDate = await _readRequestCreatedDate(tx, requestId);
-    await _assertMaterialCodeDoesNotExist(tx, req, {
+    const materialValidationResult = await _assertMaterialCodeDoesNotExist(tx, req, {
       requestId,
       processCode,
       userId,
       previousStatus: status
     });
+    if (materialValidationResult) {
+      approveResult = materialValidationResult;
+    } else {
     const sapTargets = await _resolveSapTargetsForProcess(tx, { processId, operation: 'POST' });
     if (!sapTargets.length) {
       req.reject(422, _t(req, 'noSapTargetConfigured', { processCode: processCode || 'UNKNOWN' }));
@@ -3308,6 +3322,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
         approveResult.stepCount = 1;
       }
     }
+    }
   } else {
     await tx.run(
       `UPDATE "MDG_REQUEST_HEADER"
@@ -3388,6 +3403,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
       entitySet: approveResult?.entitySet || null,
       httpStatus: approveResult?.httpStatus || null,
       finalStatus: approveResult?.finalStatus || null,
+      message: approveResult?.message || null,
       skippedFields: approveResult?.skippedFields || []
     });
   }
