@@ -35,7 +35,7 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No SAP target configured for process {processCode} and entity set {entitySet}',
     invalidDestfactFlags: 'Invalid controls: EXTEND_DESTFACT_SALES=true requires CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Mandatory fields missing for step {entitySet}: {fields}',
-    materialKtgrmReferenceMissing: 'Account assignment group could not be derived from channel 13 for material {product} and sales organization {vkorg}',
+    materialKtgrmReferenceMissing: 'Account assignment group could not be derived from channel 13 for sales organization {vkorg}',
     materialKtgrmReferenceFetchFailed: 'Could not read channel 13 reference for account assignment group: {message}'
   },
   es: {
@@ -48,7 +48,7 @@ const I18N = Object.freeze({
     noSapTargetForEntitySet: 'No hay target SAP configurado para el proceso {processCode} y entity set {entitySet}',
     invalidDestfactFlags: 'Controles inválidos: EXTEND_DESTFACT_SALES=true requiere CREATE_DESTFACT=true',
     mandatoryFieldsMissingForStep: 'Faltan campos obligatorios para el paso {entitySet}: {fields}',
-    materialKtgrmReferenceMissing: 'No se pudo derivar el grupo de imputación desde canal 13 para material {product} y organización de ventas {vkorg}',
+    materialKtgrmReferenceMissing: 'No se pudo derivar el grupo de imputación desde canal 13 para organización de ventas {vkorg}',
     materialKtgrmReferenceFetchFailed: 'No se pudo leer la referencia de canal 13 para grupo de imputación: {message}'
   }
 });
@@ -832,7 +832,7 @@ async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
     ''
   ).trim();
 
-  if (!product || !vkorg) return { derived: [] };
+  if (!vkorg) return { derived: [] };
 
   let rows;
   try {
@@ -840,8 +840,8 @@ async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
       servicePath: '/sap/opu/odata/sap/ZCDS_MATERIALES_ORGV_CDS',
       entitySet: 'zcds_materiales_orgv',
       query: {
-        '$top': 1,
-        '$filter': `Product eq '${_escapeODataLiteral(product)}' and Vkorg eq '${_escapeODataLiteral(vkorg)}' and Vtweg eq '13'`
+        '$top': 50,
+        '$filter': `Vkorg eq '${_escapeODataLiteral(vkorg)}' and Vtweg eq '13'`
       }
     });
   } catch (err) {
@@ -850,7 +850,7 @@ async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
     }));
   }
 
-  const source = (rows || [])[0] || null;
+  const source = (rows || []).find(row => _isNonEmpty(row?.Ktgrm || row?.KTGRM || row?.AcctAssignmentGroup)) || null;
   const ktgrm = String(source?.Ktgrm || source?.KTGRM || source?.AcctAssignmentGroup || '').trim();
   if (!ktgrm) {
     req.reject(422, _t(req, 'materialKtgrmReferenceMissing', { product, vkorg }));
@@ -861,7 +861,7 @@ async function _deriveMaterialSalesAreaKtgrmFromChannel13(tx, req, {
     derived: [{
       fieldCode: 'MVKE.KTGRM',
       sapField: 'Ktgrm',
-      sourceFieldCode: 'ZCDS_MATERIALES_ORGV_CDS.zcds_materiales_orgv[Vtweg=13]'
+      sourceFieldCode: 'ZCDS_MATERIALES_ORGV_CDS.zcds_materiales_orgv[Vkorg,Vtweg=13]'
     }]
   };
 }
