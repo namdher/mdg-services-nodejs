@@ -176,6 +176,13 @@ function normalizeUppercaseInput(value) {
   return typeof value === 'string' ? value.toLocaleUpperCase('es-CL') : value;
 }
 
+function normalizeSearchTerm2(value) {
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized ? normalized.slice(0, 20) : '';
+}
+
 async function isProcessCode(tx, processId, expectedCode) {
   if (!processId || !expectedCode) return false;
   const rows = await tx.run(
@@ -189,6 +196,19 @@ async function isProcessCode(tx, processId, expectedCode) {
 
 function normalizeSapField(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+function deriveCustomerSearchTerm2({ sapField, sourceByFieldCode, sourceBySapField, payloadBySapField }) {
+  const norm = normalizeSapField(sapField);
+  if (!['MCOD2', 'BU_SORT2', 'BUSORT2', 'SORT2'].includes(norm)) return '';
+  return normalizeSearchTerm2(
+    sourceByFieldCode?.get?.('KNA1.NAMORG1') ||
+    sourceBySapField?.get?.('NAMORG1') ||
+    payloadBySapField?.get?.('NAMORG1') ||
+    payloadBySapField?.get?.('NAME1') ||
+    payloadBySapField?.get?.('BUSINESSPARTNERNAME') ||
+    ''
+  );
 }
 
 function isAddressSapField(sapField) {
@@ -340,14 +360,20 @@ async function syncDestMercEmbeddedFromKna1(tx, { requestId, userId, roleCode = 
   for (const dest of dedup.values()) {
     const current = existingByFieldId.get(dest.fieldId);
     const currentValue = String(current?.VALUE || '').trim();
-    if (currentValue) continue; // destination explicit value always wins
+    const derivedSearchTerm2 = deriveCustomerSearchTerm2({
+      sapField: dest.sapField,
+      sourceByFieldCode,
+      sourceBySapField
+    });
+    if (currentValue && !derivedSearchTerm2) continue; // destination explicit value wins except system search term 2.
 
     const suffix = dest.fieldCode.toUpperCase().startsWith('BUT000-KNA1.')
       ? dest.fieldCode.slice('BUT000-KNA1.'.length)
       : null;
     const sourceFieldCode = suffix ? `KNA1.${suffix}` : null;
     const sapFieldNorm = normalizeSapField(dest.sapField);
-    const nextValue = (sourceFieldCode && sourceByFieldCode.get(sourceFieldCode))
+    const nextValue = derivedSearchTerm2
+      || (sourceFieldCode && sourceByFieldCode.get(sourceFieldCode))
       || sourceBySapField.get(sapFieldNorm)
       || null;
 
@@ -411,7 +437,7 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
       { destinationName: 'S4H-TECH' },
       {
         method: 'GET',
-        url: `/sap/opu/odata/sap/ZCDS_DESTMERC_GEN_CDS/zcds_destmerc_gen?$filter=${filter}&$select=Kunnr%2CSortl&$top=1`,
+        url: `/sap/opu/odata/sap/ZCDS_DESTMERC_GEN_CDS/zcds_destmerc_gen?$filter=${filter}&$select=Kunnr%2CSortl%2CName1&$top=1`,
         timeout: 90000,
         headers: { Accept: 'application/json' }
       }
@@ -447,7 +473,7 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
         AND fcc."COUNTRY_CODE" = ?
       WHERE pb."PROCESS_ID" = ?
         AND ob."BLOCK_CODE" = 'CUST_GEN_DESTMERC'
-        AND fc."FIELD_CODE" = 'KNA1.SORTL'
+        AND fc."FIELD_CODE" IN ('KNA1.SORTL', 'KNA1.MCOD2', 'KNA1.BU_SORT2')
         AND fc."SAP_FIELD" IS NOT NULL
         AND LENGTH(TRIM(fc."SAP_FIELD")) > 0`,
     [requesterRoleId, requesterRoleId, request.COUNTRY_CODE, request.PROCESS_ID]
@@ -461,7 +487,7 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
       control: Number(r.EFFECTIVE_CONTROL)
     }))
     .filter((r) => r.fieldId && r.fieldCode && r.sapField)
-    .filter((r) => r.fieldCode === 'KNA1.SORTL');
+    .filter((r) => ['KNA1.SORTL', 'KNA1.MCOD2', 'KNA1.BU_SORT2'].includes(r.fieldCode));
   if (!targetFields.length) return 0;
 
   const existingRows = await tx.run(
@@ -484,13 +510,18 @@ async function syncDestMercCreationFromCustomerRef(tx, { requestId, rawValue, us
   const ts = now();
   for (const field of targetFields) {
     const current = existingByFieldId.get(field.fieldId);
-    const nextValue = String(
-      payloadBySapField.get(normalizeSapField(field.sapField))
-      || payloadBySapField.get('TAXNUMBER1')
-      || payloadBySapField.get('BUSINESSPARTNERSEARCHTERM1')
-      || payloadBySapField.get('SEARCHTERM1')
-      || ''
-    ).trim();
+    const nextValue = field.fieldCode === 'KNA1.SORTL'
+      ? String(
+        payloadBySapField.get(normalizeSapField(field.sapField))
+        || payloadBySapField.get('TAXNUMBER1')
+        || payloadBySapField.get('BUSINESSPARTNERSEARCHTERM1')
+        || payloadBySapField.get('SEARCHTERM1')
+        || ''
+      ).trim()
+      : deriveCustomerSearchTerm2({
+        sapField: field.sapField,
+        payloadBySapField
+      });
     if (!nextValue) continue;
     if (areValuesEqual(current?.VALUE ?? null, nextValue)) continue;
 
@@ -624,6 +655,7 @@ async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
     [requestId, request.PROCESS_ID]
   );
 
+  const sourceByFieldCode = new Map();
   const sourceBySapField = new Map();
   const destValueByFieldId = new Map();
 
@@ -633,8 +665,10 @@ async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
     const value = row.VALUE;
     if (!sapField) continue;
 
-    if (fieldCode.startsWith('KNA1.') && isNonEmpty(value) && !sourceBySapField.has(sapField)) {
-      sourceBySapField.set(sapField, String(value));
+    const sapFieldNorm = normalizeSapField(sapField);
+    if (fieldCode.startsWith('KNA1.') && isNonEmpty(value) && !sourceBySapField.has(sapFieldNorm)) {
+      sourceByFieldCode.set(fieldCode.toUpperCase(), String(value));
+      sourceBySapField.set(sapFieldNorm, String(value));
     }
     if (fieldCode.startsWith('BUT000-KNA1.') && !destValueByFieldId.has(row.FIELD_ID)) {
       destValueByFieldId.set(row.FIELD_ID, {
@@ -648,11 +682,20 @@ async function syncDestFactReadonlyFromKna1(tx, { requestId, userId }) {
   let changed = 0;
   const ts = now();
   for (const dest of readonlyDestScoped) {
-    const sourceValue = sourceBySapField.get(dest.sapField);
+    const sourceValue = deriveCustomerSearchTerm2({
+      sapField: dest.sapField,
+      sourceByFieldCode,
+      sourceBySapField
+    }) || sourceBySapField.get(normalizeSapField(dest.sapField));
     if (!isNonEmpty(sourceValue)) continue;
 
     const currentDest = destValueByFieldId.get(dest.fieldId);
-    if (currentDest && isNonEmpty(currentDest.value)) continue;
+    const isDerivedSearchTerm2 = Boolean(deriveCustomerSearchTerm2({
+      sapField: dest.sapField,
+      sourceByFieldCode,
+      sourceBySapField
+    }));
+    if (currentDest && isNonEmpty(currentDest.value) && !isDerivedSearchTerm2) continue;
 
     if (currentDest?.valueId) {
       await tx.run(

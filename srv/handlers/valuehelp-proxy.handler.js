@@ -949,9 +949,12 @@ function _buildRemoteQuery(q, catalog, route, vhName = '') {
 }
 
 const STATIC_VH_FILTERS = {
+  VH_DestMercBP: [`BuGroup eq 'Z001'`],
   VH_OwnerBP: [`BusinessPartnerRole eq 'CRM010'`],
   VH_TransportistaBP: [`BusinessPartnerRole eq 'CRM010'`],
-  VH_DriverRelationshipBP: [`BusinessPartnerRole eq 'TM0001'`, `RelationshipCategory eq 'CRMS01'`]
+  VH_DriverRelationshipBP: [`BusinessPartnerRole eq 'TM0001'`, `RelationshipCategory eq 'CRMS01'`],
+  VH_ResourceConsumoFletero: [`Categoria eq '01'`],
+  VH_ResourceTipoFlete: [`Categoria eq '02'`]
 };
 
 async function _readRequestSubjectId(tx, requestId) {
@@ -1304,6 +1307,9 @@ module.exports = {
   readShipToGen: expose('VH_ShipToGen'),
   readShipToCom: expose('VH_ShipToCom'),
   readResources: expose('VH_Resources'),
+  readDeliveryPriority: expose('VH_DeliveryPriority'),
+  readResourceConsumoFletero: expose('VH_ResourceConsumoFletero'),
+  readResourceTipoFlete: expose('VH_ResourceTipoFlete'),
   readResourceTransportationType: expose('VH_ResourceTransportationType'),
   readResourceLocation: expose('VH_ResourceLocation'),
   validateVhMappingsOnStartup

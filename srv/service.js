@@ -38,6 +38,7 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_OwnerBP', vh.readOwnerBp);
   this.on('READ', 'VH_TransportistaBP', vh.readTransportistaBp);
   this.on('READ', 'VH_CustomerPaymentCondition', vh.readCustomerPaymentCondition);
+  this.on('READ', 'VH_DeliveryPriority', vh.readDeliveryPriority);
   this.on('READ', 'VH_CustomerBzirk', vh.readCustomerBzirk);
   this.on('READ', 'VH_SalesGroup', vh.readSalesGroup);
   this.on('READ', 'VH_SalesOffice', vh.readSalesOffice);
@@ -115,6 +116,8 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_ShipToGen', vh.readShipToGen);
   this.on('READ', 'VH_ShipToCom', vh.readShipToCom);
   this.on('READ', 'VH_Resources', vh.readResources);
+  this.on('READ', 'VH_ResourceConsumoFletero', vh.readResourceConsumoFletero);
+  this.on('READ', 'VH_ResourceTipoFlete', vh.readResourceTipoFlete);
   this.on('READ', 'VH_ResourceTransportationType', vh.readResourceTransportationType);
   this.on('READ', 'VH_ResourceLocation', vh.readResourceLocation);
   this.on('READ', 'VH_BU_GROUP', internalVh.readVhBuGroup);

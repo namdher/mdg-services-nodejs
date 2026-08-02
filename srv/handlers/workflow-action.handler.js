@@ -876,14 +876,8 @@ function _normalizeSearchTermValue(value, maxLength = 20) {
 
 function _deriveMcod2ValueFromPayload(payload, options = {}) {
   if (!payload || typeof payload !== 'object') return '';
-  const processCode = String(options.processCode || '').trim().toUpperCase();
 
-  if (processCode === 'CUSTOMER_CREATION') {
-    const rutValue = _normalizeSearchTermValue(payload.Sortl || '');
-    if (rutValue) return rutValue;
-  }
-
-  const orgName = _normalizeSearchTermValue(payload.Namorg1 || payload.Name1 || payload.NameText || '');
+  const orgName = _normalizeSearchTermValue(payload.Namorg1 || payload.Name1 || payload.NameText || payload.BusinessPartnerName || '');
   if (orgName) return orgName;
 
   const personName = _normalizeSearchTermValue(
@@ -896,8 +890,14 @@ function _deriveMcod2ValueFromPayload(payload, options = {}) {
   return '';
 }
 
-function _deriveBusort2ValueFromPayload(payload) {
+function _deriveBusort2ValueFromPayload(payload, options = {}) {
   if (!payload || typeof payload !== 'object') return '';
+  const entitySet = String(options.entitySet || '').trim().toUpperCase();
+
+  if (entitySet.includes('GENERALSET')) {
+    const orgName = _normalizeSearchTermValue(payload.Namorg1 || payload.Name1 || payload.NameText || payload.BusinessPartnerName || '');
+    if (orgName) return orgName;
+  }
 
   const driverSearchTerm = _normalizeSearchTermValue(
     [payload.NameFirst, payload.NameLast]
@@ -923,7 +923,8 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
   const processCode = String(options.processCode || '').trim().toUpperCase();
   const entitySet = String(options.entitySet || '').trim().toUpperCase();
   const mcod2 = _deriveMcod2ValueFromPayload(payload, { processCode });
-  if (mcod2 && !_isNonEmpty(payload.Mcod2)) {
+  const shouldForceOrgSearchTerm = entitySet.includes('GENERALSET') && _isNonEmpty(payload.Namorg1 || payload.Name1 || payload.NameText);
+  if (mcod2 && (!_isNonEmpty(payload.Mcod2) || shouldForceOrgSearchTerm)) {
     payload.Mcod2 = mcod2;
     derived.push({
       fieldCode: '*.MCOD2',
@@ -932,9 +933,9 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
     });
   }
 
-  if (processCode === 'TRANSPORT_DRIVER_CREATION') {
-    const busort2 = _deriveBusort2ValueFromPayload(payload);
-    if (busort2 && !_isNonEmpty(payload.Busort2)) {
+  if (processCode === 'TRANSPORT_DRIVER_CREATION' || shouldForceOrgSearchTerm) {
+    const busort2 = _deriveBusort2ValueFromPayload(payload, { entitySet });
+    if (busort2 && (!_isNonEmpty(payload.Busort2) || shouldForceOrgSearchTerm)) {
       payload.Busort2 = busort2;
       derived.push({
         fieldCode: '*.BU_SORT2',

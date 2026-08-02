@@ -223,6 +223,11 @@ service MDGService @(path:'/mdg') {
     PaymentTerms                    : String(4);
   }
 
+  @cds.persistence.skip @readonly entity VH_DeliveryPriority {
+    key DeliveryPriority            : String(2);
+    DeliveryPriorityDesc            : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_CustomerBzirk {
     key SalesDistrict               : String(6);
     SalesDistrict_Text              : String(120);
@@ -639,6 +644,20 @@ service MDGService @(path:'/mdg') {
     ResourceGroup : String(60);
   }
 
+  @cds.persistence.skip @readonly entity VH_ResourceConsumoFletero {
+    key Atributo : String(20);
+    Categoria    : String(2);
+    Language     : String(2);
+    Descripcion  : String(120);
+  }
+
+  @cds.persistence.skip @readonly entity VH_ResourceTipoFlete {
+    key Atributo : String(20);
+    Categoria    : String(2);
+    Language     : String(2);
+    Descripcion  : String(120);
+  }
+
   @cds.persistence.skip @readonly entity VH_ResourceTransportationType {
     key TransportationType : String(10);
     Description            : String(40);
@@ -1042,6 +1061,11 @@ annotate MDGService.VH_CustomerPaymentCondition with {
   PaymentCondition @Common.Label: 'Condición de pago';
   PaymentCondition_Text @Common.Label: 'Descripción';
   PaymentTerms @Common.Label: 'Términos de pago';
+};
+
+annotate MDGService.VH_DeliveryPriority with {
+  DeliveryPriority @Common.Label: 'Prioridad de entrega';
+  DeliveryPriorityDesc @Common.Label: 'Descripción';
 };
 
 annotate MDGService.VH_CustomerBzirk with {
@@ -1457,6 +1481,20 @@ annotate MDGService.VH_Resources with {
   Simsessid @Common.Label: 'Sesión simulación';
   Name @Common.Label: 'Nombre';
   ResourceGroup @Common.Label: 'Grupo de recursos';
+};
+
+annotate MDGService.VH_ResourceConsumoFletero with {
+  Atributo @Common.Label: 'Consumo Fletero';
+  Categoria @Common.Label: 'Categoría';
+  Language @Common.Label: 'Idioma';
+  Descripcion @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_ResourceTipoFlete with {
+  Atributo @Common.Label: 'Tipo de Flete';
+  Categoria @Common.Label: 'Categoría';
+  Language @Common.Label: 'Idioma';
+  Descripcion @Common.Label: 'Descripción';
 };
 
 annotate MDGService.VH_ResourceTransportationType with {
