@@ -949,7 +949,6 @@ function _buildRemoteQuery(q, catalog, route, vhName = '') {
 }
 
 const STATIC_VH_FILTERS = {
-  VH_DestMercBP: [`BuGroup eq 'Z001'`],
   VH_OwnerBP: [`BusinessPartnerRole eq 'CRM010'`],
   VH_TransportistaBP: [`BusinessPartnerRole eq 'CRM010'`],
   VH_DriverRelationshipBP: [`BusinessPartnerRole eq 'TM0001'`, `RelationshipCategory eq 'CRMS01'`],
