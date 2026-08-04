@@ -89,13 +89,36 @@ async function reopenForTechnicalRetry(tx, requestId, userId) {
 
 async function latestSapMessage(tx, requestId) {
   const rows = await tx.run(
-    `SELECT "STATUS", "HTTP_STATUS", "SAP_OBJECT_KEY", "MESSAGE", "PAYLOAD_JSON", "CREATEDAT"
+    `SELECT "HTTP_STATUS", "SAP_OBJECT_KEY", "PAYLOAD_JSON", "RESPONSE_JSON", "CREATEDAT"
        FROM "MDG_REQUEST_SAP_MESSAGE"
       WHERE "REQUEST_ID" = ?
       ORDER BY "CREATEDAT" DESC`,
     [requestId]
   );
-  return rows[0] || null;
+  const row = rows[0] || null;
+  if (!row) return null;
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(row.RESPONSE_JSON || '{}');
+  } catch (err) {
+    parsed = {};
+  }
+  const mdgResult = parsed._mdgResult || {};
+  const sapError = parsed.error || {};
+  const sapMessage = sapError?.message && typeof sapError.message === 'object'
+    ? sapError.message.value
+    : sapError?.message;
+
+  return {
+    HTTP_STATUS: row.HTTP_STATUS,
+    SAP_OBJECT_KEY: row.SAP_OBJECT_KEY,
+    STATUS: mdgResult.status || null,
+    STEP: mdgResult.stepCode || mdgResult.entitySet || null,
+    MESSAGE: mdgResult.message || sapMessage || null,
+    PAYLOAD_JSON: row.PAYLOAD_JSON,
+    CREATEDAT: row.CREATEDAT
+  };
 }
 
 async function main() {

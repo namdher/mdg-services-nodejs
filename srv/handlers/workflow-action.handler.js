@@ -740,6 +740,59 @@ function _applyTransportDriverGeneralDefaults(payload, options = {}) {
   return { payload, derived };
 }
 
+async function _ensureTransportDriverGeneralIdentity(tx, {
+  requestId,
+  payload,
+  processCode,
+  entitySet
+}) {
+  if (!payload || typeof payload !== 'object') return { payload, derived: [] };
+  const normalizedProcess = String(processCode || '').trim().toUpperCase();
+  const normalizedEntitySet = String(entitySet || '').trim().toUpperCase();
+  if (normalizedProcess !== 'TRANSPORT_DRIVER_CREATION' || normalizedEntitySet !== 'CONDUCTORESGENERALSET') {
+    return { payload, derived: [] };
+  }
+
+  const derived = [];
+  if (!_isNonEmpty(payload.NameFirst)) {
+    const nameFirst = await _readLatestRequestFieldValueByCode(tx, {
+      requestId,
+      fieldCode: 'BUT000.NAME_FIRST'
+    });
+    if (nameFirst) {
+      payload.NameFirst = nameFirst;
+      derived.push({
+        fieldCode: 'BUT000.NAME_FIRST',
+        sapField: 'NameFirst',
+        sourceFieldCode: 'REQUEST_VALUE_DRIVER_NAME_FIRST'
+      });
+    }
+  }
+
+  if (!_isNonEmpty(payload.NameLast)) {
+    const nameLast = await _readLatestRequestFieldValueByCode(tx, {
+      requestId,
+      fieldCode: 'BUT000.NAME_LAST'
+    });
+    if (nameLast) {
+      payload.NameLast = nameLast;
+      derived.push({
+        fieldCode: 'BUT000.NAME_LAST',
+        sapField: 'NameLast',
+        sourceFieldCode: 'REQUEST_VALUE_DRIVER_NAME_LAST'
+      });
+    }
+  }
+
+  const fallbackResult = _applyTransportDriverGeneralDefaults(payload, {
+    processCode: normalizedProcess,
+    entitySet: normalizedEntitySet
+  });
+  if (fallbackResult?.derived?.length) derived.push(...fallbackResult.derived);
+
+  return { payload, derived };
+}
+
 async function _sanitizePayloadForSapTarget(tx, {
   sapTargetId,
   payload
@@ -2197,6 +2250,13 @@ function _setCustomerIdInPayloadFromSchema(entitySet, payload, customerId) {
   return payload;
 }
 
+function _isTransportDriverRoleAlreadyAssigned({ processCode, entitySet, result }) {
+  if (String(processCode || '').trim().toUpperCase() !== 'TRANSPORT_DRIVER_CREATION') return false;
+  if (String(entitySet || '').trim().toUpperCase() !== 'CONDUCTORESROLSET') return false;
+  const message = String(result?.sapErrorMessage || result?.message || '').trim().toUpperCase();
+  return message.includes('YA EXISTE') && message.includes('TM0001');
+}
+
 function _setPayloadPropertyFromSchema(entitySet, payload, propertyCandidates, value, fallbackProperty) {
   const resolvedValue = String(value || '').trim();
   if (!resolvedValue || !payload || typeof payload !== 'object') return payload;
@@ -3050,6 +3110,46 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           continue;
         }
 
+        if (!isGeneralStep) {
+          const alreadyOk = await _readLatestSuccessfulStep(tx, {
+            requestId,
+            processId,
+            entitySet: target.entitySet
+          });
+          if (alreadyOk) {
+            const resumedId = String(alreadyOk.SAP_OBJECT_KEY || '').trim() || conductorId || null;
+            stepResults.push({
+              ok: true,
+              skippedFields: [],
+              httpStatus: Number(alreadyOk.HTTP_STATUS || 200),
+              sapObjectKey: resumedId,
+              skippedStep: true,
+              resumed: true
+            });
+            await _persistSkippedStepResult(tx, {
+              requestId,
+              processCode,
+              sapTarget: target,
+              reason: 'already_completed',
+              message: `Paso ${target.entitySet} omitido por estar previamente completado`,
+              externalId: resumedId
+            });
+            await insertActionLog(tx, {
+              requestId,
+              action: 'SAP_STEP_SKIPPED',
+              actorUser: userId,
+              actorRole: ROLE_CODES.APPROVER,
+              comment: _stringifySafe({
+                step: target.entitySet,
+                entitySet: target.entitySet,
+                reason: 'already_completed',
+                sapObjectKey: resumedId
+              })
+            });
+            continue;
+          }
+        }
+
         const { payload, skippedFields } = await _buildSapPayload(
           tx,
           requestId,
@@ -3074,6 +3174,25 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           allowedFieldIds,
           payload
         });
+        const driverIdentityResult = await _ensureTransportDriverGeneralIdentity(tx, {
+          requestId,
+          payload,
+          processCode,
+          entitySet: target.entitySet
+        });
+        const derivedResult = _applyDerivedBusinessTermsToPayload(payload, { processCode, entitySet: target.entitySet });
+        const derivedFields = [
+          ...(driverIdentityResult?.derived || []),
+          ...(derivedResult?.derived || [])
+        ];
+        if (derivedFields.length) {
+          skippedFields.push(...derivedFields.map((field) => ({
+            fieldId: field.fieldId || null,
+            fieldCode: field.fieldCode || field.sourceFieldCode || null,
+            sapField: field.sapField || null,
+            reason: 'derived_value'
+          })));
+        }
         if (!isGeneralStep && conductorId) {
           _setCustomerIdInPayloadFromSchema(target.entitySet, payload, conductorId);
         }
@@ -3097,7 +3216,7 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           throw err;
         }
 
-        const result = await _postToS4AndPersist(tx, {
+        let result = await _postToS4AndPersist(tx, {
           req,
           requestId,
           processId,
@@ -3112,9 +3231,29 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
           updateSubjectFromSap: target.entitySet === 'ConductoresGeneralSet'
         });
 
+        if (!result.ok && _isTransportDriverRoleAlreadyAssigned({ processCode, entitySet: target.entitySet, result })) {
+          await _persistSkippedStepResult(tx, {
+            requestId,
+            processCode,
+            sapTarget: target,
+            reason: 'already_assigned',
+            message: `Paso ${target.entitySet} omitido porque la función TM0001 ya existe para el conductor`,
+            externalId: conductorId
+          });
+          result = {
+            ...result,
+            ok: true,
+            httpStatus: 208,
+            finalStatus: STATUS_COMPLETED,
+            sapObjectKey: conductorId || result.sapObjectKey || null,
+            sapErrorMessage: null,
+            idempotentSkip: true
+          };
+        }
+
         await insertActionLog(tx, {
           requestId,
-          action: result.ok ? 'SAP_STEP_OK' : 'SAP_STEP_ERROR',
+          action: result.idempotentSkip ? 'SAP_STEP_SKIPPED' : (result.ok ? 'SAP_STEP_OK' : 'SAP_STEP_ERROR'),
           actorUser: userId,
           actorRole: ROLE_CODES.APPROVER,
           comment: _stringifySafe({
@@ -3123,11 +3262,19 @@ async function _handleDecision(req, { actionName, toStatus, taskDecision }) {
             ok: result.ok,
             httpStatus: result.httpStatus,
             sapObjectKey: result.sapObjectKey || null,
+            idempotentSkip: Boolean(result.idempotentSkip),
             payload: _summarizePayload(payload)
           })
         });
 
-        if (result.ok) {
+        if (result.idempotentSkip) {
+          await insertComment(tx, {
+            requestId,
+            authorUser: userId,
+            authorRole: roleToBusinessName(ROLE_CODES.APPROVER),
+            message: `Paso ${target.entitySet} omitido: la función TM0001 ya existe para el conductor.`
+          });
+        } else if (result.ok) {
           await insertComment(tx, {
             requestId,
             authorUser: userId,
