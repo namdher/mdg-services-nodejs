@@ -624,7 +624,9 @@ async function _applyConfiguredDefaultsToPayload(tx, {
 
     const canonical = canonicalByNorm.get(_normalizePropertyName(sapField));
     if (!canonical?.propName) continue;
-    if (_isNonEmpty(payload[canonical.propName])) continue;
+    const fieldControl = Number(row.FIELD_CONTROL ?? 0);
+    const forceSystemDefault = fieldControl === 3 || fieldControl === 7;
+    if (_isNonEmpty(payload[canonical.propName]) && !forceSystemDefault) continue;
 
     let effectiveDefaultValue = defaultValue;
     const isDateLikeDefault =
@@ -645,7 +647,7 @@ async function _applyConfiguredDefaultsToPayload(tx, {
       fieldId: row.FIELD_ID,
       fieldCode: String(row.FIELD_CODE || '').trim(),
       sapField,
-      fieldControl: Number(row.FIELD_CONTROL ?? 0),
+      fieldControl,
       sourceFieldCode: 'CONFIG_DEFAULT'
     });
   }
