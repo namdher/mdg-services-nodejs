@@ -95,6 +95,7 @@ const SAP_PROPERTY_ALIASES = Object.freeze({
     zzfityp: 'Zzfityp'
   }),
   CONDUCTORESGENERALSET: Object.freeze({
+    partner: 'Kunnr',
     fityp: 'Zzfityp',
     zzfityp: 'Zzfityp'
   })
@@ -662,7 +663,7 @@ function _applyMaterialComboApprovalDefaults(payload) {
     Mbrsh: 'B',
     Spras: 'ES',
     Mtposmara: 'NORM',
-    Mtpos: 'NORM',
+    Mtpos: 'LUMF',
     Taxm1: '0',
     Taxm2: '0',
     Taxm3: '0',
@@ -704,6 +705,39 @@ function _applyMaterialComboApprovalDefaults(payload) {
   }
 
   return changed;
+}
+
+function _applyTransportDriverGeneralDefaults(payload, options = {}) {
+  if (!payload || typeof payload !== 'object') return { payload, derived: [] };
+  const processCode = String(options.processCode || '').trim().toUpperCase();
+  const entitySet = String(options.entitySet || '').trim().toUpperCase();
+  if (processCode !== 'TRANSPORT_DRIVER_CREATION' || entitySet !== 'CONDUCTORESGENERALSET') {
+    return { payload, derived: [] };
+  }
+
+  const derived = [];
+  if (!_isNonEmpty(payload.NameLast)) {
+    const fallbackLastName = _normalizeSearchTermValue(
+      payload.Apell ||
+        payload.Name1text ||
+        payload.Name1Text ||
+        payload.NameFirst ||
+        payload.Nombr ||
+        payload.Busort2 ||
+        '',
+      40
+    );
+    if (fallbackLastName) {
+      payload.NameLast = fallbackLastName;
+      derived.push({
+        fieldCode: 'BUT000.NAME_LAST',
+        sapField: 'NameLast',
+        sourceFieldCode: 'DERIVED_DRIVER_LAST_NAME'
+      });
+    }
+  }
+
+  return { payload, derived };
 }
 
 async function _sanitizePayloadForSapTarget(tx, {
@@ -945,6 +979,11 @@ function _applyDerivedBusinessTermsToPayload(payload, options = {}) {
         sourceFieldCode: 'DERIVED_DRIVER_SEARCH_TERM'
       });
     }
+  }
+
+  const driverDefaults = _applyTransportDriverGeneralDefaults(payload, { processCode, entitySet });
+  if (driverDefaults?.derived?.length) {
+    derived.push(...driverDefaults.derived);
   }
 
   if (entitySet === 'CLIENTESSOCIEDADSET' || entitySet === 'CLIENTESEMPRESARIALSET') {

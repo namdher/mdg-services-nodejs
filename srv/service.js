@@ -52,6 +52,16 @@ module.exports = cds.service.impl(async function () {
   this.on('READ', 'VH_CustomerGroup8', vh.readCustomerGroup8);
   this.on('READ', 'VH_CustomerGroup9', vh.readCustomerGroup9);
   this.on('READ', 'VH_CustomerGroup10', vh.readCustomerGroup10);
+  this.on('READ', 'VH_CustomerAttribute1', vh.readCustomerAttribute1);
+  this.on('READ', 'VH_CustomerAttribute2', vh.readCustomerAttribute2);
+  this.on('READ', 'VH_CustomerAttribute3', vh.readCustomerAttribute3);
+  this.on('READ', 'VH_CustomerAttribute4', vh.readCustomerAttribute4);
+  this.on('READ', 'VH_CustomerAttribute5', vh.readCustomerAttribute5);
+  this.on('READ', 'VH_CustomerAttribute6', vh.readCustomerAttribute6);
+  this.on('READ', 'VH_CustomerAttribute7', vh.readCustomerAttribute7);
+  this.on('READ', 'VH_CustomerAttribute8', vh.readCustomerAttribute8);
+  this.on('READ', 'VH_CustomerAttribute9', vh.readCustomerAttribute9);
+  this.on('READ', 'VH_CustomerAttribute10', vh.readCustomerAttribute10);
   this.on('READ', 'VH_DestMercRelevanciaAnalco', vh.readDestMercRelevanciaAnalco);
   this.on('READ', 'VH_DestMercRelevanciaCerveza', vh.readDestMercRelevanciaCerveza);
   this.on('READ', 'VH_DestMercRelevanciaCPCH', vh.readDestMercRelevanciaCPCH);

@@ -300,6 +300,56 @@ service MDGService @(path:'/mdg') {
     SalesOrganization               : String(4);
   }
 
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute1 {
+    key CustomerAttribute1          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute2 {
+    key CustomerAttribute2          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute3 {
+    key CustomerAttribute3          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute4 {
+    key CustomerAttribute4          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute5 {
+    key CustomerAttribute5          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute6 {
+    key CustomerAttribute6          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute7 {
+    key CustomerAttribute7          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute8 {
+    key CustomerAttribute8          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute9 {
+    key CustomerAttribute9          : String(10);
+    CustomerAttrName                : String(60);
+  }
+
+  @cds.persistence.skip @readonly entity VH_CustomerAttribute10 {
+    key CustomerAttribute10         : String(10);
+    CustomerAttrName                : String(60);
+  }
+
   @cds.persistence.skip @readonly entity VH_DestMercRelevanciaAnalco {
     key Codigo                      : String(10);
     Descripcion                     : String(25);
@@ -1138,6 +1188,56 @@ annotate MDGService.VH_CustomerGroup10 with {
   CustomerGroup10 @Common.Label: 'Grupo de clientes 10';
   CustomerGroupName @Common.Label: 'Descripción';
   SalesOrganization @Common.Label: 'Organización de ventas';
+};
+
+annotate MDGService.VH_CustomerAttribute1 with {
+  CustomerAttribute1 @Common.Label: 'Atributo 1';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute2 with {
+  CustomerAttribute2 @Common.Label: 'Atributo 2';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute3 with {
+  CustomerAttribute3 @Common.Label: 'Atributo 3';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute4 with {
+  CustomerAttribute4 @Common.Label: 'Atributo 4';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute5 with {
+  CustomerAttribute5 @Common.Label: 'Ocasión de Consumo';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute6 with {
+  CustomerAttribute6 @Common.Label: 'Atributo 6';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute7 with {
+  CustomerAttribute7 @Common.Label: 'Atributo 7';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute8 with {
+  CustomerAttribute8 @Common.Label: 'Patente de Alcohol';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute9 with {
+  CustomerAttribute9 @Common.Label: 'OC Obligatoria';
+  CustomerAttrName @Common.Label: 'Descripción';
+};
+
+annotate MDGService.VH_CustomerAttribute10 with {
+  CustomerAttribute10 @Common.Label: 'Zona Peligrosa';
+  CustomerAttrName @Common.Label: 'Descripción';
 };
 
 annotate MDGService.VH_DestMercRelevanciaAnalco with {
